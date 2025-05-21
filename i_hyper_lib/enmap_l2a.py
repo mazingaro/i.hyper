@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys, os, xml.etree.ElementTree as ET, rasterio, grass.script as gs
 from grass.pygrass.modules import Module
+import grass.script as gs
 import contextlib
 
 COMPOSITES = {
@@ -41,6 +42,8 @@ def parse_band_metadata(meta_xml_path, total_bands):
 def find_nearest_band(wavelength, wavelengths):
     return min(range(len(wavelengths)), key=lambda i: abs(wavelengths[i] - wavelength)) + 1
 
+#Module("g.region", n=5142105, s=5106495, e=542955, w=498435, b=0, t=167, tbres=1, res=30, quiet=True)
+
 def import_enmap(folder, output, composites=None):
     tif_path = os.path.join(folder, next(f for f in os.listdir(folder) if f.endswith("SPECTRAL_IMAGE.TIF")))
     meta_path = os.path.join(folder, next(f for f in os.listdir(folder) if f.endswith("METADATA.XML")))
@@ -60,9 +63,14 @@ def import_enmap(folder, output, composites=None):
         # Apply color enhancement to the specified bands
         Module("i.colors.enhance", red="enmap_b047@PERMANENT", green="enmap_b032@PERMANENT", blue="enmap_b013@PERMANENT", strength='98', flags='p', quiet=True)
 
+
         Module("i.group", group=f"{output}_group", input=band_names, quiet=True)
+        gs.use_temp_region()
+        t=len(band_names)
+        Module("g.region", raster=band_names[0], b=0, t=t, tbres=1, quiet=True)     
         Module("r.to.rast3", input=band_names, output=output, quiet=True, overwrite=True)
         Module("r3.mapcalc", expression=f"{output}_scaled = {output} / 10000.0", quiet=True, overwrite=True)
+        gs.del_temp_region()
         Module("g.remove", type="raster_3d", name=output, flags="f", quiet=True)
         Module("g.rename", raster_3d=(f"{output}_scaled", output), quiet=True)
 
