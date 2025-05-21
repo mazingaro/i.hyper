@@ -87,19 +87,12 @@ def preprocess_hyperspectral(input_raster, output_raster, window_length=11, poly
     # Read the 3D raster into a numpy array using garray.array3d
     input_array = garray.array3d(input_raster)
 
-    # Save the garray to a temporary .npy file for inspection
-    np.save("/tmp/input_array.npy", input_array)  # Save to temporary file for debugging
-    print(f"Input array shape: {input_array.shape}")
-
     # Apply the Savitzky-Golay filter to each pixel in the raster
     depths, rows, cols = input_array.shape
     for y in range(rows):
         for x in range(cols):
             # Extract the spectrum for this pixel (band values)
             spectrum = input_array[:, y, x]
-            
-            # Debugging: Check the shape of the spectrum at (z, y, x)
-            print(f"At (y={y}, x={x}), spectrum shape: {spectrum.shape} - spectrum: {spectrum}")
 
             # Ensure spectrum is a valid 1D array before applying filter
             if spectrum.ndim == 1:  # Check if spectrum is a 1D array
