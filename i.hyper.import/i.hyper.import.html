@@ -1,0 +1,37 @@
+<h2>DESCRIPTION</h2>
+<p>The purpose of <em>i.hyper.import</em> is to import hyperspectral imagery nto a GRASS GIS 3D raster format (<code>raster_3d</code>). It converts spectral image bands into an internally grouped 3D cube and attaches relevant per-band metadata: <strong>wavelength</strong>, <strong>FWHM</strong>, <strong>valid</strong> and <strong>unit</strong>.
+Currently only <strong>EnMAP L2A</strong> products—i</p>
+<p>Parameter <strong>input</strong> is a directory path pointing to an uncompressed EnMAP L2A product folder, which must contain both the <code>SPECTRAL_IMAGE.TIF</code> and the corresponding <code>METADATA.XML</code>.<br />
+Parameter <strong>output</strong> defines the base name for the output raster_3d map and all temporary bands.</p>
+<p>The module parses metadata, checks pixel values, finds unusable bands, and attaches all relevant spectral metadata into the final output cube.</p>
+<h2>NOTES</h2>
+<ul>
+<li>Bands that are fully zero, fully null, or contain any negative values are marked with <code>valid: 0</code>. All others are marked <code>valid: 1</code>. This is used in the other modules to mask the invalid bands.</li>
+<li>GDAL stderr messages about missing statistics (<code>Failed to compute min/max</code>) are suppressed internally to avoid misleading user warnings.</li>
+<li>The resulted hyperspectral 3D raster map has reflectance values from 0 to 1.</li>
+<li>All temporary rasters are cleaned up automatically after conversion to <code>raster_3d</code>.</li>
+</ul>
+<p>This module is designed to be extensible—support for other sensors (e.g., PRISMA <code>.he5</code>) will be added in the future.</p>
+<h2>EXAMPLE</h2>
+<p><code>sh
+i.hyper.import input=/data/ output=enmap product="EnMAP L2A"</code></p>
+<h2>REFERENCES</h2>
+<ul>
+<li>
+<p>EnMAP Data &amp; Access, GFZ German Research Centre for Geosciences. 
+<a href="https://www.enmap.org/data_access/">EnMAP Data &amp; Access</a>  </p>
+</li>
+<li>
+<p>GRASS GIS Programmer’s Manual.</p>
+</li>
+</ul>
+<h2>SEE ALSO</h2>
+<ul>
+<li><a href="https://grass.osgeo.org/grass-stable/manuals/r.external.html">r.external</a>  </li>
+<li><a href="https://grass.osgeo.org/grass-stable/manuals/r.to.rast3.html">r.to.rast3</a>  </li>
+<li><a href="https://grass.osgeo.org/grass-stable/manuals/r3.support.html">r3.support</a>  </li>
+<li><a href="https://grass.osgeo.org/grass-stable/manuals/i.group.html">i.group</a></li>
+</ul>
+<h2>AUTHORS</h2>
+<p>Alen Mangafić<br />
+Geodetic Institute of Slovenia</p>
