@@ -55,7 +55,10 @@ def import_enmap(folder, output, composites=None):
                 Module("r.external", input=tif_path, output=bname, band=b, flags="o", quiet=True, overwrite=True)
             wavelengths.append(band_meta[b]["wavelength"])
             band_names.append(bname)
-            Module("r.colors", map=bname, color="grey", quiet=True)
+            Module("r.colors", map=bname, color="grey.eq", quiet=True)
+
+        # Apply color enhancement to the specified bands
+        Module("i.colors.enhance", red="enmap_b047@PERMANENT", green="enmap_b032@PERMANENT", blue="enmap_b013@PERMANENT", strength='98', flags='p', quiet=True)
 
         Module("i.group", group=f"{output}_group", input=band_names, quiet=True)
         Module("r.to.rast3", input=band_names, output=output, quiet=True, overwrite=True)
@@ -82,9 +85,13 @@ def import_enmap(folder, output, composites=None):
 
                 gs.info(f"Generated composite raster: {output}_{comp.lower()}")
 
+        # Remove the original bands that were used for composites
         unused_bands = set(band_names) - used_bands
         if unused_bands:
             Module("g.remove", type="raster", name=list(unused_bands), flags="f", quiet=True)
+
+        # Remove any bands after composites creation (including any not used for composites)
+        Module("g.remove", type="raster", name=band_names, flags="f", quiet=True)
 
         desc = ["Hyperspectral Metadata:", f"Bands: {total_bands}"]
         for i, wl in enumerate(wavelengths):
