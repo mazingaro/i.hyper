@@ -22,15 +22,16 @@
 # % keyword: algebra
 # % keyword: random
 # %end
-# %option G_OPT_R_INPUT
+# %option G_OPT_R3_INPUT
 # %end
-# %option G_OPT_R_OUTPUT
+# %option G_OPT_F_OUTPUT
 # %end
-
 
 import sys
 import atexit
 import grass.script as gs
+import subprocess
+import os
 
 
 def clean(name):
@@ -43,20 +44,33 @@ def main():
     input_raster = options["input"]
     output_raster = options["output"]
 
-    # crete a temporary raster that will be removed upon exit
-    temporary_raster = gs.append_node_pid("gauss")
-    atexit.register(clean, temporary_raster)
+    # Step 1: Decompose the 3D raster into individual 2D rasters
+    temp_rasters = []
+    info = gs.read_command("r3.info", map=input_raster, flags="g").strip()
 
-    # if changing computational region is needed, uncomment
-    # gs.use_temp_region()
+    # Extract the number of layers (bands) from the info output
+    num_bands_line = [line for line in info.split("\n") if "depth" in line]
+    num_bands = int(num_bands_line[0].split("=")[1].strip()) if num_bands_line else 0
 
-    # verbose message with translatable string
-    gs.verbose(_("Generating temporary raster {tmp}").format(tmp=temporary_raster))
-    # run analysis
-    gs.run_command("r.surf.gauss", output=temporary_raster)
-    gs.mapcalc(f"{output_raster} = {input_raster} + {temporary_raster}")
+    for band in range(1, num_bands + 1):
+        temp_raster = f"band_{band}"
+        # Correct usage of r3.to.rast without the band= parameter
+        gs.run_command("r3.to.rast", input=input_raster, output=temp_raster, flags="r")
+        temp_rasters.append(temp_raster)
 
-    # save history into the output raster
+    # Step 2: Group the 2D rasters into a single 2D raster stack
+    group_name = "hyperspectral_group"
+    gs.run_command("i.group", group=group_name, input=",".join(temp_rasters))
+
+    # Step 3: Export the stack as GeoTIFF
+    gs.run_command("r.out.gdal", input=group_name, output=output_raster, format="GTiff", overwrite=True)
+
+    # Clean up temporary rasters and group
+    for temp_raster in temp_rasters:
+        gs.run_command("g.remove", type="raster", name=temp_raster, flags="f", superquiet=True)
+    gs.run_command("g.remove", type="group", name=group_name, flags="f", superquiet=True)
+
+    # Save history into the output raster
     gs.raster_history(output_raster, overwrite=True)
 
 

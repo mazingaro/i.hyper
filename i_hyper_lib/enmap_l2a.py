@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import sys, os, xml.etree.ElementTree as ET, rasterio, grass.script as gs
 from grass.pygrass.modules import Module
-import grass.script as gs
 import contextlib
 
 COMPOSITES = {
@@ -42,8 +41,6 @@ def parse_band_metadata(meta_xml_path, total_bands):
 def find_nearest_band(wavelength, wavelengths):
     return min(range(len(wavelengths)), key=lambda i: abs(wavelengths[i] - wavelength)) + 1
 
-#Module("g.region", n=5142105, s=5106495, e=542955, w=498435, b=0, t=167, tbres=1, res=30, quiet=True)
-
 def import_enmap(folder, output, composites=None):
     tif_path = os.path.join(folder, next(f for f in os.listdir(folder) if f.endswith("SPECTRAL_IMAGE.TIF")))
     meta_path = os.path.join(folder, next(f for f in os.listdir(folder) if f.endswith("METADATA.XML")))
@@ -60,14 +57,24 @@ def import_enmap(folder, output, composites=None):
             band_names.append(bname)
             Module("r.colors", map=bname, color="grey.eq", quiet=True)
 
-        # Apply color enhancement to the specified bands
-        Module("i.colors.enhance", red="enmap_b047@PERMANENT", green="enmap_b032@PERMANENT", blue="enmap_b013@PERMANENT", strength='98', flags='p', quiet=True)
+        # Always enhance RGB bands
+        rgb_target = COMPOSITES["RGB"]
+        rgb_indices = [find_nearest_band(wl, wavelengths) for wl in rgb_target]
+        rgb_enhanced = {}
+        red, green, blue = [band_names[i - 1] for i in rgb_indices]
 
+        Module("i.colors.enhance",
+               red=red, green=green, blue=blue,
+               strength="98", flags="p", quiet=True)
+
+        rgb_enhanced[rgb_indices[0]] = red
+        rgb_enhanced[rgb_indices[1]] = green
+        rgb_enhanced[rgb_indices[2]] = blue
 
         Module("i.group", group=f"{output}_group", input=band_names, quiet=True)
         gs.use_temp_region()
-        t=len(band_names)
-        Module("g.region", raster=band_names[0], b=0, t=t, tbres=1, quiet=True)     
+        t = len(band_names)
+        Module("g.region", raster=band_names[0], b=0, t=t, tbres=1, quiet=True)
         Module("r.to.rast3", input=band_names, output=output, quiet=True, overwrite=True)
         Module("r3.mapcalc", expression=f"{output}_scaled = {output} / 10000.0", quiet=True, overwrite=True)
         gs.del_temp_region()
@@ -75,7 +82,7 @@ def import_enmap(folder, output, composites=None):
         Module("g.rename", raster_3d=(f"{output}_scaled", output), quiet=True)
 
         for idx, bname in enumerate(band_names, start=1):
-            wl, meta = wavelengths[idx-1], band_meta[idx]
+            wl, meta = wavelengths[idx - 1], band_meta[idx]
             Module("r.support", map=bname, title=f"Band {idx}", units="nm",
                    source1=f"Wavelength: {wl} nm", source2=f"FWHM: {meta['fwhm']} nm",
                    description=f"valid: {meta['valid']}", quiet=True)
@@ -83,22 +90,22 @@ def import_enmap(folder, output, composites=None):
         used_bands = set()
         if composites:
             for comp in composites:
+                if comp not in COMPOSITES:
+                    continue
                 bands = [find_nearest_band(wl, wavelengths) for wl in COMPOSITES[comp]]
-                rgb_maps = [band_names[b-1] for b in bands]
+                rgb_maps = []
+                for b in bands:
+                    if b in rgb_enhanced:
+                        rgb_maps.append(rgb_enhanced[b])
+                    else:
+                        rgb_maps.append(band_names[b - 1])
                 used_bands.update(rgb_maps)
-
                 Module("r.composite",
                        red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
                        output=f"{output}_{comp.lower()}", quiet=True, overwrite=True)
-
                 gs.info(f"Generated composite raster: {output}_{comp.lower()}")
 
-        # Remove the original bands that were used for composites
-        unused_bands = set(band_names) - used_bands
-        if unused_bands:
-            Module("g.remove", type="raster", name=list(unused_bands), flags="f", quiet=True)
-
-        # Remove any bands after composites creation (including any not used for composites)
+        # Cleanup all temporary 2D rasters
         Module("g.remove", type="raster", name=band_names, flags="f", quiet=True)
 
         desc = ["Hyperspectral Metadata:", f"Bands: {total_bands}"]
