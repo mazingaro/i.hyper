@@ -60,6 +60,8 @@ def main():
                    output=output_file,
                    format="GTiff",
                    createopt="COMPRESS=DEFLATE,PREDICTOR=3,BIGTIFF=YES,INTERLEAVE=BAND",
+                   nodata=0,
+                   flags='c',
                    overwrite=True,
                    quiet=True)
 
