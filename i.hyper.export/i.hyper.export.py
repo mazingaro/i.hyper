@@ -2,76 +2,70 @@
 
 ##############################################################################
 # MODULE:    i.hyper.export
-#
-# AUTHOR(S): Alen Mangafić <alen.mangafic@gis.si>
-#
-# PURPOSE:   Export hyperspectral data cubes.
-#
-# COPYRIGHT: (C) 2025 by Alen Mangafić and the GRASS Development Team
-#
-#            This program is free software under the GNU General Public
-#            License (>=v2). Read the file COPYING that comes with GRASS
-#            for details.
+# AUTHOR(S): Alen Mangafic <alen.mangafic@gis.si>
+# PURPOSE:   Export 3D hyperspectral raster cube as a compressed multi-band GeoTIFF.
+# COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
 ##############################################################################
 
-"""Export hyperspectral data cubes."""
-
 # %module
-# % description: Export hyperspectral data cubes.
-# % keyword: raster
-# % keyword: algebra
-# % keyword: random
+# % description: Export 3D hyperspectral raster cube to compressed multi-band GeoTIFF.
+# % keyword: raster3d
+# % keyword: export
 # %end
+
 # %option G_OPT_R3_INPUT
+# % required: yes
+# % description: Input 3D raster map
+# % guisection: Input
 # %end
+
 # %option G_OPT_F_OUTPUT
+# % required: yes
+# % description: Output file name (GeoTIFF will be created)
+# % guisection: Output
 # %end
 
 import sys
-import atexit
 import grass.script as gs
-import subprocess
-import os
-
-
-def clean(name):
-    gs.run_command("g.remove", type="raster", name=name, flags="f", superquiet=True)
 
 
 def main():
-    # get input options
     options, flags = gs.parser()
-    input_raster = options["input"]
-    output_raster = options["output"]
+    input_3d = options["input"]
+    output_file = options["output"]
 
-    # Step 1: Decompose the 3D raster into individual 2D rasters
+    # Get number of slices (depth)
+    info = gs.read_command("r3.info", map=input_3d, flags="g")
+    num_bands = int([l for l in info.splitlines() if l.startswith("depth=")][0].split("=")[1])
+
     temp_rasters = []
-    info = gs.read_command("r3.info", map=input_raster, flags="g").strip()
+    for i in range(1, num_bands + 1):
+        name = f"{input_3d}_b{i:03d}"
+        gs.run_command("r3.to.rast", input=input_3d, output=name, slice=i, quiet=True)
+        temp_rasters.append(name)
 
-    # Extract the number of layers (bands) from the info output
-    num_bands_line = [line for line in info.split("\n") if "depth" in line]
-    num_bands = int(num_bands_line[0].split("=")[1].strip()) if num_bands_line else 0
+    # Create a temporary group
+    group_name = f"{input_3d}_export_group"
+    gs.run_command("i.group", group=group_name, input=",".join(temp_rasters), quiet=True)
 
-    for band in range(1, num_bands + 1):
-        temp_raster = f"band_{band}"
-        # Correct usage of r3.to.rast without the band= parameter
-        gs.run_command("r3.to.rast", input=input_raster, output=temp_raster, flags="r")
-        temp_rasters.append(temp_raster)
+    # Align region to first band
+    gs.run_command("g.region", raster=temp_rasters[0], align=temp_rasters[0], quiet=True)
 
-    # Step 2: Group the 2D rasters into a single 2D raster stack
-    group_name = "hyperspectral_group"
-    gs.run_command("i.group", group=group_name, input=",".join(temp_rasters))
+    # Export the group
+    gs.run_command("r.out.gdal",
+                   input=group_name,
+                   output=output_file,
+                   format="GTiff",
+                   type="Float32",
+                   createopt="COMPRESS=DEFLATE,PREDICTOR=3,BIGTIFF=YES,INTERLEAVE=BAND",
+                   overwrite=True,
+                   quiet=True)
 
-    # Step 3: Export the stack as GeoTIFF
-    gs.run_command("r.out.gdal", input=group_name, output=output_raster, format="GTiff", overwrite=True)
+    # Cleanup
+    gs.run_command("g.remove", type="raster", name=temp_rasters, flags="f", quiet=True)
+    gs.run_command("g.remove", type="group", name=group_name, flags="f", quiet=True)
 
-    # Clean up temporary rasters and group
-    for temp_raster in temp_rasters:
-        gs.run_command("g.remove", type="raster", name=temp_raster, flags="f", superquiet=True)
-    gs.run_command("g.remove", type="group", name=group_name, flags="f", superquiet=True)
-
-    # Save history into the output raster
-    gs.raster_history(output_raster, overwrite=True)
+    gs.message(f"Exported {input_3d} to {output_file}")
 
 
 if __name__ == "__main__":

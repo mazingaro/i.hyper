@@ -23,7 +23,6 @@
 # % keyword: random
 # %end
 
-# Input/Output options
 # %option G_OPT_R3_INPUT
 # % key: input
 # % description: Input hyperspectral raster map
@@ -63,57 +62,43 @@
 import sys
 import atexit
 import grass.script as gs
+import grass.script.array as garray
 import numpy as np
 from scipy.signal import savgol_filter
-import grass.script.array as garray
 
 def savitzky_golay_filter(spectrum, window_length, polyorder, interpolate_nodata=True):
-    # Ensure window_length and polyorder are integers
     window_length = int(window_length)
     polyorder = int(polyorder)
-
-    # Ensure the spectrum is a numeric array (float)
-    spectrum = np.asarray(spectrum, dtype=np.float32)  # Convert to numeric array (float32)
-
-    # Check if spectrum is 1D array
-    if spectrum.ndim == 1:
-        if interpolate_nodata:
-            spectrum = np.nan_to_num(spectrum, nan=0.0)  # Replace NaN with 0 if interpolate is True
-        return savgol_filter(spectrum, window_length, polyorder, deriv=1, mode='nearest')
-    else:
-        raise ValueError(f"Spectrum should be a 1D array, but got a {spectrum.ndim}D array.")
+    spectrum = np.asarray(spectrum, dtype=np.float32)
+    if interpolate_nodata:
+        spectrum = np.nan_to_num(spectrum, nan=0.0)
+    return savgol_filter(spectrum, window_length, polyorder, deriv=1, mode='nearest')
 
 def preprocess_hyperspectral(input_raster, output_raster, window_length=11, polyorder=1, interpolate_nodata=True):
-    # Read the 3D raster into a numpy array using garray.array3d
+    gs.run_command("g.region", raster_3d=input_raster)
     input_array = garray.array3d(input_raster)
+    depth, rows, cols = input_array.shape
 
-    # Apply the Savitzky-Golay filter to each pixel in the raster
-    depths, rows, cols = input_array.shape
+    output_array = garray.array3d()
+    output_array[...] = np.empty((depth, rows, cols), dtype=np.float32)
+
     for y in range(rows):
         for x in range(cols):
-            # Extract the spectrum for this pixel (band values)
             spectrum = input_array[:, y, x]
-
-            # Ensure spectrum is a valid 1D array before applying filter
-            if spectrum.ndim == 1:  # Check if spectrum is a 1D array
+            if spectrum.ndim == 1:
                 filtered_spectrum = savitzky_golay_filter(spectrum, window_length, polyorder, interpolate_nodata)
-                input_array[:, y, x] = filtered_spectrum
-            else:
-                raise ValueError(f"Invalid spectrum shape at (y={y}, x={x}): expected 1D array, got {spectrum.shape}")
+                output_array[:, y, x] = filtered_spectrum
 
-    # Write the processed array back to GRASS raster
-    input_array.write(output_raster, overwrite=True)
+    output_array.write(output_raster, overwrite=True)
 
 def main():
     options, flags = gs.parser()
     input_raster = options["input"]
     output_raster = options["output"]
+    derivative_order = int(options["derivative_order"])
+    window_length = int(options["window_length"])
+    interpolate_nodata = "-i" not in flags
 
-    derivative_order = options["derivative_order"] or 1
-    window_length = options["window_length"] or 11
-    interpolate_nodata = "-i" in flags
-
-    # Preprocess hyperspectral data
     preprocess_hyperspectral(input_raster, output_raster, window_length, derivative_order, interpolate_nodata)
 
 if __name__ == "__main__":
