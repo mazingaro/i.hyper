@@ -28,44 +28,45 @@
 import sys
 import grass.script as gs
 
-
 def main():
     options, flags = gs.parser()
-    input_3d = options["input"]
+    input_3d_full = options["input"]
     output_file = options["output"]
 
-    # Get number of slices (depth)
-    info = gs.read_command("r3.info", map=input_3d, flags="g")
-    num_bands = int([l for l in info.splitlines() if l.startswith("depth=")][0].split("=")[1])
+    input_3d = input_3d_full.split("@")[0]
+    base = f"{input_3d}_slice"
 
-    temp_rasters = []
-    for i in range(1, num_bands + 1):
-        name = f"{input_3d}_b{i:03d}"
-        gs.run_command("r3.to.rast", input=input_3d, output=name, slice=i, quiet=True)
-        temp_rasters.append(name)
+    # Convert 3D raster to 2D slices
+    gs.run_command("r3.to.rast", input=input_3d_full, output=base, quiet=True)
 
-    # Create a temporary group
+    # Use g.list to get unqualified raster names (safe)
+    raster_list = gs.parse_command("g.list", type="raster", pattern=f"{base}_*", flags="m")
+
+    # Sort while stripping any mapset
+    def _get_index(rname):
+        r = rname.split("@")[0]
+        return int(r[len(base) + 1:])
+    raster_list = sorted(raster_list, key=_get_index)
+
+    if not raster_list:
+        gs.fatal(f"No valid slice maps found with base name {base}_*")
+
     group_name = f"{input_3d}_export_group"
-    gs.run_command("i.group", group=group_name, input=",".join(temp_rasters), quiet=True)
+    gs.run_command("i.group", group=group_name, input=",".join(raster_list), quiet=True)
+    gs.run_command("g.region", raster=raster_list[0], align=raster_list[0], quiet=True)
 
-    # Align region to first band
-    gs.run_command("g.region", raster=temp_rasters[0], align=temp_rasters[0], quiet=True)
-
-    # Export the group
     gs.run_command("r.out.gdal",
                    input=group_name,
                    output=output_file,
                    format="GTiff",
-                   type="Float32",
                    createopt="COMPRESS=DEFLATE,PREDICTOR=3,BIGTIFF=YES,INTERLEAVE=BAND",
                    overwrite=True,
                    quiet=True)
 
-    # Cleanup
-    gs.run_command("g.remove", type="raster", name=temp_rasters, flags="f", quiet=True)
+    gs.run_command("g.remove", type="raster", name=raster_list, flags="f", quiet=True)
     gs.run_command("g.remove", type="group", name=group_name, flags="f", quiet=True)
 
-    gs.message(f"Exported {input_3d} to {output_file}")
+    gs.message(f"Exported {input_3d_full} to {output_file} as multi-band GeoTIFF")
 
 
 if __name__ == "__main__":

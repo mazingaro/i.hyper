@@ -40,7 +40,7 @@
 # % description: Derivative order for Savitzky-Golay filter
 # % type: integer
 # % required: no
-# % answer: 1
+# % answer: 0
 # % guisection: Savitzky-Golay
 # %end
 
