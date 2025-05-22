@@ -9,9 +9,6 @@
 #
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
 #
-#            This program is free software under the GNU General Public
-#            License (>=v2). Read the file COPYING that comes with GRASS
-#            for details.
 ##############################################################################
 
 """Hyperspectral imagery preprocessing."""
@@ -36,8 +33,17 @@
 # %end
 
 # %option
+# % key: polyorder
+# % description: Polynomial order for Savitzky-Golay filter (default: 2)
+# % type: integer
+# % required: no
+# % answer: 2
+# % guisection: Savitzky-Golay
+# %end
+
+# %option
 # % key: derivative_order
-# % description: Derivative order for Savitzky-Golay filter
+# % description: Derivative order for Savitzky-Golay filter (0 = just smoothing)
 # % type: integer
 # % required: no
 # % answer: 0
@@ -60,21 +66,21 @@
 # %end
 
 import sys
-import atexit
 import grass.script as gs
 import grass.script.array as garray
 import numpy as np
 from scipy.signal import savgol_filter
 
-def savitzky_golay_filter(spectrum, window_length, polyorder, interpolate_nodata=True):
+def savitzky_golay_filter(spectrum, window_length, polyorder, derivative_order=0, interpolate_nodata=True):
     window_length = int(window_length)
     polyorder = int(polyorder)
+    derivative_order = int(derivative_order)
     spectrum = np.asarray(spectrum, dtype=np.float32)
     if interpolate_nodata:
         spectrum = np.nan_to_num(spectrum, nan=0.0)
-    return savgol_filter(spectrum, window_length, polyorder, deriv=1, mode='nearest')
+    return savgol_filter(spectrum, window_length, polyorder, deriv=derivative_order, mode='interp')
 
-def preprocess_hyperspectral(input_raster, output_raster, window_length=11, polyorder=1, interpolate_nodata=True):
+def preprocess_hyperspectral(input_raster, output_raster, window_length=11, polyorder=2, derivative_order=0, interpolate_nodata=True):
     gs.run_command("g.region", raster_3d=input_raster)
     input_array = garray.array3d(input_raster)
     depth, rows, cols = input_array.shape
@@ -86,20 +92,33 @@ def preprocess_hyperspectral(input_raster, output_raster, window_length=11, poly
         for x in range(cols):
             spectrum = input_array[:, y, x]
             if spectrum.ndim == 1:
-                filtered_spectrum = savitzky_golay_filter(spectrum, window_length, polyorder, interpolate_nodata)
+                filtered_spectrum = savitzky_golay_filter(
+                    spectrum, window_length, polyorder, derivative_order, interpolate_nodata
+                )
                 output_array[:, y, x] = filtered_spectrum
 
     output_array.write(output_raster, overwrite=True)
+
+    # Set all zeros to null using r3.null
+    gs.run_command("r3.null", map=output_raster, setnull=0)
 
 def main():
     options, flags = gs.parser()
     input_raster = options["input"]
     output_raster = options["output"]
+    polyorder = int(options["polyorder"])
     derivative_order = int(options["derivative_order"])
     window_length = int(options["window_length"])
     interpolate_nodata = "-i" not in flags
 
-    preprocess_hyperspectral(input_raster, output_raster, window_length, derivative_order, interpolate_nodata)
+    preprocess_hyperspectral(
+        input_raster,
+        output_raster,
+        window_length,
+        polyorder,
+        derivative_order,
+        interpolate_nodata,
+    )
 
 if __name__ == "__main__":
     sys.exit(main())

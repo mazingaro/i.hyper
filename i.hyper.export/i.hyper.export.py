@@ -60,10 +60,10 @@ def main():
                    output=output_file,
                    format="GTiff",
                    createopt="COMPRESS=DEFLATE,PREDICTOR=3,BIGTIFF=YES,INTERLEAVE=BAND",
-                   nodata=0,
+                   nodata=-9999,
                    flags='c',
                    overwrite=True,
-                   quiet=True)
+                   superquiet=True)
 
     gs.run_command("g.remove", type="raster", name=raster_list, flags="f", quiet=True)
     gs.run_command("g.remove", type="group", name=group_name, flags="f", quiet=True)
