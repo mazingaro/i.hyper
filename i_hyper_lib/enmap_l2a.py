@@ -41,7 +41,7 @@ def parse_band_metadata(meta_xml_path, total_bands):
 def find_nearest_band(wavelength, wavelengths):
     return min(range(len(wavelengths)), key=lambda i: abs(wavelengths[i] - wavelength)) + 1
 
-def import_enmap(folder, output, composites=None):
+def import_enmap(folder, output, composites=None, custom_wavelengths=None):
     tif_path = os.path.join(folder, next(f for f in os.listdir(folder) if f.endswith("SPECTRAL_IMAGE.TIF")))
     meta_path = os.path.join(folder, next(f for f in os.listdir(folder) if f.endswith("METADATA.XML")))
 
@@ -105,6 +105,23 @@ def import_enmap(folder, output, composites=None):
                        output=f"{output}_{comp.lower()}", quiet=True, overwrite=True)
                 gs.info(f"Generated composite raster: {output}_{comp.lower()}")
 
+        # Handle custom user-defined composite
+        if custom_wavelengths:
+            custom_indices = [find_nearest_band(wl, wavelengths) for wl in custom_wavelengths]
+            custom_maps = []
+            for b in custom_indices:
+                if b in rgb_enhanced:
+                    custom_maps.append(rgb_enhanced[b])
+                else:
+                    custom_maps.append(band_names[b - 1])
+            Module("i.colors.enhance",
+                   red=custom_maps[0], green=custom_maps[1], blue=custom_maps[2],
+                   strength="98", flags="p", quiet=True)
+            Module("r.composite",
+                   red=custom_maps[0], green=custom_maps[1], blue=custom_maps[2],
+                   output=f"{output}_custom", quiet=True, overwrite=True)
+            gs.info(f"Generated custom composite raster: {output}_custom")
+
         # Cleanup all temporary 2D rasters
         Module("g.remove", type="raster", name=band_names, flags="f", quiet=True)
 
@@ -121,5 +138,18 @@ def import_enmap(folder, output, composites=None):
                quiet=True)
 
 def run_import(options):
-    import_enmap(options["input"], options["output"],
-                 composites=options["composites"].upper().split(",") if options.get("composites") else None)
+    custom = None
+    if options.get("composites_custom"):
+        try:
+            custom = [float(x.strip()) for x in options["composites_custom"].split(",")]
+            if len(custom) != 3:
+                raise ValueError
+        except Exception:
+            gs.fatal("Invalid format for composites_custom. Use: 850,1650,660")
+
+    import_enmap(
+        options["input"],
+        options["output"],
+        composites=options["composites"].upper().split(",") if options.get("composites") else None,
+        custom_wavelengths=custom
+    )

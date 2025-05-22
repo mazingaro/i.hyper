@@ -44,6 +44,14 @@
 # % guisection: Optional
 # %end
 
+# %option
+# % key: composites_custom
+# % type: string
+# % description: Wavelenghts for custom composites
+# % guisection: Optional
+# %end
+
+
 import sys
 import os
 import importlib.util
