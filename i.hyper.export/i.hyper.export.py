@@ -36,13 +36,14 @@ def main():
     input_3d = input_3d_full.split("@")[0]
     base = f"{input_3d}_slice"
 
+    # Set region to match 3D raster
+    gs.run_command("g.region", raster_3d=input_3d_full)
+
     # Convert 3D raster to 2D slices
     gs.run_command("r3.to.rast", input=input_3d_full, output=base, quiet=True)
 
-    # Use g.list to get unqualified raster names (safe)
+    # Get the list of slices
     raster_list = gs.parse_command("g.list", type="raster", pattern=f"{base}_*", flags="m")
-
-    # Sort while stripping any mapset
     def _get_index(rname):
         r = rname.split("@")[0]
         return int(r[len(base) + 1:])
@@ -51,10 +52,14 @@ def main():
     if not raster_list:
         gs.fatal(f"No valid slice maps found with base name {base}_*")
 
+    # Create imagery group
     group_name = f"{input_3d}_export_group"
     gs.run_command("i.group", group=group_name, input=",".join(raster_list), quiet=True)
+
+    # Set region to the first raster for export
     gs.run_command("g.region", raster=raster_list[0], align=raster_list[0], quiet=True)
 
+    # Export the group as a multi-band GeoTIFF
     gs.run_command("r.out.gdal",
                    input=group_name,
                    output=output_file,
@@ -65,11 +70,11 @@ def main():
                    overwrite=True,
                    superquiet=True)
 
+    # Clean up temporary rasters and group
     gs.run_command("g.remove", type="raster", name=raster_list, flags="f", quiet=True)
     gs.run_command("g.remove", type="group", name=group_name, flags="f", quiet=True)
 
     gs.message(f"Exported {input_3d_full} to {output_file} as multi-band GeoTIFF")
-
 
 if __name__ == "__main__":
     sys.exit(main())

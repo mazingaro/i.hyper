@@ -11,31 +11,33 @@
 #
 ##############################################################################
 
-"""Hyperspectral imagery preprocessing."""
+"""Hyperspectral imagery preprocessing"""
 
 # %module
-# % description: Hyperspectral imagery preprocessing.
+# % description: General hyperspectral data preprocessing
 # % keyword: raster
-# % keyword: algebra
-# % keyword: random
+# % keyword: hyperspectral
+# % keyword: preprocessing
 # %end
 
 # %option G_OPT_R3_INPUT
 # % key: input
 # % description: Input hyperspectral raster map
-# % required : yes
+# % required: yes
+# % guisection: Input
 # %end
 
 # %option G_OPT_R3_OUTPUT
 # % key: output
-# % description: Output raster map after preprocessing
-# % required : yes
+# % description: Output preprocessed raster map
+# % required: yes
+# % guisection: Output
 # %end
 
 # %option
 # % key: polyorder
-# % description: Polynomial order for Savitzky-Golay filter (default: 2)
 # % type: integer
+# % description: Polynomial order for Savitzky-Golay filter
 # % required: no
 # % answer: 2
 # % guisection: Savitzky-Golay
@@ -43,8 +45,8 @@
 
 # %option
 # % key: derivative_order
-# % description: Derivative order for Savitzky-Golay filter (0 = just smoothing)
 # % type: integer
+# % description: Derivative order (0 = smoothing only)
 # % required: no
 # % answer: 0
 # % guisection: Savitzky-Golay
@@ -52,72 +54,152 @@
 
 # %option
 # % key: window_length
-# % description: Window length for Savitzky-Golay filter (odd number, default: 11)
 # % type: integer
+# % description: Window length (must be odd number)
 # % required: no
 # % answer: 11
 # % guisection: Savitzky-Golay
 # %end
 
 # %flag
-# % key: i
-# % description: Don't interpolate no data pixels
-# % guisection: Savitzky-Golay
+# % key: q
+# % description: Interpolate missing values in valid bands
+# % guisection: Null/Value handling
+# %end
+
+# %flag
+# % key: z
+# % description: Clamp negative values to zero
+# % guisection: Null/Value handling
 # %end
 
 import sys
+import numpy as np
+from scipy.interpolate import interp1d
+from scipy.signal import savgol_filter
 import grass.script as gs
 import grass.script.array as garray
-import numpy as np
-from scipy.signal import savgol_filter
 
-def savitzky_golay_filter(spectrum, window_length, polyorder, derivative_order=0, interpolate_nodata=True):
-    window_length = int(window_length)
-    polyorder = int(polyorder)
-    derivative_order = int(derivative_order)
+def fill_nans(spectrum):
+    """Interpolate NaN values using linear interpolation"""
+    valid = np.isfinite(spectrum)
+    if np.sum(valid) < 2:
+        return spectrum
+    x = np.arange(len(spectrum))
+    interp = interp1d(x[valid], spectrum[valid],
+                      kind='linear', fill_value='extrapolate')
+    return interp(x)
+
+def savitzky_golay_filter(spectrum, window_length, polyorder,
+                          derivative_order=0, interpolate_nodata=False):
+    """Apply Savitzky-Golay filter with proper NaN handling"""
     spectrum = np.asarray(spectrum, dtype=np.float32)
-    if interpolate_nodata:
-        spectrum = np.nan_to_num(spectrum, nan=0.0)
-    return savgol_filter(spectrum, window_length, polyorder, deriv=derivative_order, mode='interp')
 
-def preprocess_hyperspectral(input_raster, output_raster, window_length=11, polyorder=2, derivative_order=0, interpolate_nodata=True):
+    # Clamp negative values to zero before interpolation
+    spectrum = np.where(spectrum < 0, 0, spectrum)
+
+    # Interpolate missing values if requested
+    if interpolate_nodata:
+        spectrum = fill_nans(spectrum)
+
+    if np.any(np.isnan(spectrum)):
+        return np.full_like(spectrum, np.nan)
+
+    try:
+        result = savgol_filter(spectrum, window_length, polyorder,
+                              deriv=derivative_order, mode='interp')
+        return result
+    except ValueError as e:
+        gs.fatal(f"Savitzky-Golay error: {str(e)}")
+
+def copy_r3_metadata(input_raster, output_raster):
+    """Copy r3.info metadata (title, vunit, description, comments) from input to output raster_3d."""
+    info = gs.read_command("r3.info", map=input_raster)
+    title = None
+    vunit = None
+    description = []
+    comments = []
+    capture_comment = False
+
+    for line in info.splitlines():
+        if line.startswith("| Title:"):
+            title = line.split(":", 1)[1].strip()
+        elif line.startswith("| Vertical unit:"):
+            vunit = line.split(":", 1)[1].strip()
+        elif line.startswith("|    Data Description:"):
+            capture_comment = False
+        elif line.startswith("|    Comments:"):
+            capture_comment = True
+            continue
+        elif line.startswith("|") and capture_comment:
+            comment = line[1:].strip()
+            if comment:
+                comments.append(comment)
+        elif line.startswith("|") and not capture_comment:
+            description.append(line[1:].strip())
+
+    description_text = "\n".join(description).strip()
+    comments_text = "\n".join(comments).strip()
+
+    gs.run_command("r3.support",
+        map=output_raster,
+        title=title if title else "",
+        vunit=vunit if vunit else "",
+        description=description_text,
+        comments=comments_text,
+        quiet=True
+    )
+
+def preprocess_hyperspectral(input_raster, output_raster, window_length=11,
+                             polyorder=2, derivative_order=0,
+                             interpolate_nodata=False):
+    if window_length % 2 == 0:
+        gs.fatal("Window length must be an odd number")
+
+    gs.use_temp_region()
     gs.run_command("g.region", raster_3d=input_raster)
+
     input_array = garray.array3d(input_raster)
     depth, rows, cols = input_array.shape
 
+    # Filter out null bands (all-NaN)
+    valid_bands = ~np.all(np.isnan(input_array), axis=(1, 2))
+    input_data = input_array[valid_bands, :, :]
+
+    if input_data.shape[0] == 0:
+        gs.fatal("No valid bands remaining after filtering")
+
+    # Reshape to spectra-by-pixels
+    spectra = input_data.reshape(input_data.shape[0], -1).T
+
+    filtered = np.apply_along_axis(
+        savitzky_golay_filter, 1, spectra,
+        window_length, polyorder,
+        derivative_order, interpolate_nodata
+    )
+
+    filtered_3d = filtered.T.reshape(input_data.shape[0], rows, cols)
+
     output_array = garray.array3d()
-    output_array[...] = np.empty((depth, rows, cols), dtype=np.float32)
-
-    for y in range(rows):
-        for x in range(cols):
-            spectrum = input_array[:, y, x]
-            if spectrum.ndim == 1:
-                filtered_spectrum = savitzky_golay_filter(
-                    spectrum, window_length, polyorder, derivative_order, interpolate_nodata
-                )
-                output_array[:, y, x] = filtered_spectrum
-
-    output_array.write(output_raster, overwrite=True)
-
-    # Set all zeros to null using r3.null
-    gs.run_command("r3.null", map=output_raster, setnull=0)
+    output_array[...] = filtered_3d
+    output_array.write(mapname=output_raster, overwrite=True)
+    copy_r3_metadata(input_raster, output_raster)
+    gs.run_command("g.region", raster_3d=output_raster)
 
 def main():
     options, flags = gs.parser()
-    input_raster = options["input"]
-    output_raster = options["output"]
-    polyorder = int(options["polyorder"])
-    derivative_order = int(options["derivative_order"])
     window_length = int(options["window_length"])
-    interpolate_nodata = "-i" not in flags
+
+    if window_length % 2 == 0:
+        gs.fatal("Window length must be an odd number")
 
     preprocess_hyperspectral(
-        input_raster,
-        output_raster,
-        window_length,
-        polyorder,
-        derivative_order,
-        interpolate_nodata,
+        input_raster=options["input"],
+        output_raster=options["output"],
+        window_length=window_length,
+        polyorder=int(options["polyorder"]),
+        derivative_order=int(options["derivative_order"]),
+        interpolate_nodata="q" in flags
     )
 
 if __name__ == "__main__":

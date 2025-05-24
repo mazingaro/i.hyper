@@ -51,6 +51,11 @@
 # % guisection: Optional
 # %end
 
+# %flag
+# % key: n
+# % description: Import also all-NULL bands
+# % guisection: Optional
+# %end
 
 import sys
 import os
@@ -64,7 +69,7 @@ PRODUCT_MODULE_MAP = {
     "Hyperion": "hyperion"
 }
 
-def import_by_product(product, options):
+def import_by_product(product, options, flags):
     module_name = PRODUCT_MODULE_MAP.get(product)
     if not module_name:
         gs.fatal(f"Unsupported product: {product}")
@@ -82,12 +87,12 @@ def import_by_product(product, options):
     spec.loader.exec_module(module)
     return module
 
-def main():
+def main(options, flags):
     product = options["product"]
     gs.info(f"Importing product: {product}")
-    import_hyper = import_by_product(product, options)
-    import_hyper.run_import(options)
+    import_hyper = import_by_product(product, options, flags)
+    import_hyper.run_import(options, flags)
 
 if __name__ == "__main__":
     options, flags = gs.parser()
-    sys.exit(main())
+    sys.exit(main(options, flags))
