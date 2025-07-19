@@ -82,8 +82,6 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                    green=rgb_enhanced[rgb_indices[1]],
                    blue=rgb_enhanced[rgb_indices[2]],
                    strength="98", flags="p", quiet=True)
-
-        # --- TEMP REGION FOR COMPOSITES ---
         gs.use_temp_region()
         Module("g.region", raster=band_names[0], quiet=True)
 
@@ -100,6 +98,11 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                     else:
                         rgb_maps.append(band_names[b - 1])
                 used_bands.update(rgb_maps)
+
+                Module("i.colors.enhance",
+                       red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
+                       strength="98", flags="p", quiet=True)
+
                 Module("r.composite",
                        red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
                        output=f"{output}_{comp.lower()}", quiet=True, overwrite=True)
@@ -113,6 +116,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                     custom_maps.append(rgb_enhanced[b])
                 else:
                     custom_maps.append(band_names[b - 1])
+
             Module("i.colors.enhance",
                    red=custom_maps[0], green=custom_maps[1], blue=custom_maps[2],
                    strength="98", flags="p", quiet=True)
@@ -122,7 +126,6 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
             gs.info(f"Generated custom composite raster: {output}_custom")
 
         gs.del_temp_region()
-        # --- END TEMP REGION ---
 
         Module("i.group", group=f"{output}_group", input=band_names, quiet=True)
         gs.use_temp_region()
