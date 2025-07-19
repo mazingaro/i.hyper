@@ -22,7 +22,6 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
     root = tree.getroot()
     band_data, expected = {}, set()
 
-    # Parse XML metadata
     for band in root.findall(".//bandCharacterisation/bandID"):
         idx = int(band.attrib["number"])
         band_data[idx] = {
@@ -31,14 +30,12 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
             "valid": 0
         }
 
-    # Get expected channels from XML
     for path in [".//vnirProductQuality/expectedChannelsList",
                  ".//swirProductQuality/expectedChannelsList"]:
         node = root.find(path)
         if node is not None and node.text:
             expected.update(int(x.strip()) for x in node.text.split(","))
 
-    # Get GDAL validity from statistics
     with rasterio.open(tif_path) as src:
         for b in range(1, total_bands + 1):
             stats_valid = src.tags(b).get('STATISTICS_VALID_PERCENT')
@@ -75,7 +72,6 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
             band_names.append(bname)
             Module("r.colors", map=bname, color="grey.eq", quiet=True)
 
-        # Enhanced RGB handling
         rgb_target = COMPOSITES["RGB"]
         rgb_indices = [find_nearest_band(wl, wavelengths) for wl in rgb_target]
         rgb_enhanced = {valid_bands[i-1]: band_names[i-1] for i in rgb_indices}
@@ -86,7 +82,11 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                    green=rgb_enhanced[rgb_indices[1]],
                    blue=rgb_enhanced[rgb_indices[2]],
                    strength="98", flags="p", quiet=True)
-        # Create the composites
+
+        # --- TEMP REGION FOR COMPOSITES ---
+        gs.use_temp_region()
+        Module("g.region", raster=band_names[0], quiet=True)
+
         used_bands = set()
         if composites:
             for comp in composites:
@@ -105,7 +105,6 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                        output=f"{output}_{comp.lower()}", quiet=True, overwrite=True)
                 gs.info(f"Generated composite raster: {output}_{comp.lower()}")
 
-        # Handle custom user-defined composite
         if custom_wavelengths:
             custom_indices = [find_nearest_band(wl, wavelengths) for wl in custom_wavelengths]
             custom_maps = []
@@ -122,7 +121,9 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                    output=f"{output}_custom", quiet=True, overwrite=True)
             gs.info(f"Generated custom composite raster: {output}_custom")
 
-        # Group and 3D processing
+        gs.del_temp_region()
+        # --- END TEMP REGION ---
+
         Module("i.group", group=f"{output}_group", input=band_names, quiet=True)
         gs.use_temp_region()
         Module("g.region", raster=band_names[0], b=0, t=len(band_names), tbres=1, quiet=True)
@@ -132,7 +133,6 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
         Module("g.remove", type="raster_3d", name=output, flags="f", quiet=True)
         Module("g.rename", raster_3d=(f"{output}_scaled", output), quiet=True)
 
-        # Metadata
         desc = ["Hyperspectral Metadata:", f"Valid Bands: {len(valid_bands)}"]
         for idx, b in enumerate(valid_bands, 1):
             meta = band_meta[b]
@@ -148,7 +148,6 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                description="\n".join(desc),
                vunit="nm", quiet=True)
 
-        # Cleanup (delete 2D rasters after composite creation)
         Module("g.remove", type="raster", name=band_names, flags="f", quiet=True)
 
 def run_import(options, flags):
