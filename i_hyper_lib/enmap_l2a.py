@@ -32,7 +32,7 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
         }
 
     # Get expected channels from XML
-    for path in [".//vnirProductQuality/expectedChannelsList", 
+    for path in [".//vnirProductQuality/expectedChannelsList",
                  ".//swirProductQuality/expectedChannelsList"]:
         node = root.find(path)
         if node is not None and node.text:
@@ -42,8 +42,8 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
     with rasterio.open(tif_path) as src:
         for b in range(1, total_bands + 1):
             stats_valid = src.tags(b).get('STATISTICS_VALID_PERCENT')
-            valid = 1 if (b in expected and 
-                         stats_valid and 
+            valid = 1 if (b in expected and
+                         stats_valid and
                          float(stats_valid) > 0) else 0
             if b not in band_data:
                 band_data[b] = {"valid": valid}
