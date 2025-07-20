@@ -15,17 +15,32 @@
 # %end
 
 # %option G_OPT_R3_INPUT
-# % key: input
-# % description: Input 3D hyperspectral cube
+# % key: map
+# % description: Input 3D raster map with hyperspectral data
 # % required: yes
-# % guisection: Input
 # %end
 
+import sys
+import grass.script as gs
 
-# %option
-# % key: prefix
-# % type: string
-# % required: yes
-# % description: Prefix for output composites
-# % guisection: Settings
-# %end
+def main():
+    options, flags = gs.parser()
+    
+    try:
+        # Set up GRASS GUI paths
+        from grass.script.setup import set_gui_path
+        set_gui_path()
+
+        import wx
+        from hyperspectral_profile_frame import HyperspectralProfileFrame
+        
+        app = wx.App(False)
+        frame = HyperspectralProfileFrame(map=options['map'])
+        frame.Show()
+        app.MainLoop()
+        
+    except Exception as e:
+        gs.fatal(f"Failed to launch GUI: {e}")
+        
+if __name__ == "__main__":
+    main()
