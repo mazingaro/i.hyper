@@ -185,6 +185,9 @@ def main(options, flags):
     if len(coords) % 2 != 0:
         gs.fatal("Coordinates list must contain an even number of values (E,N pairs)")
 
+    gs.use_temp_region()
+    gs.run_command("g.region", raster_3d=mapname)
+
     points = []
 
     for i in range(0, len(coords), 2):
