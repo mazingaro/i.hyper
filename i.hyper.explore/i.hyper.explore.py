@@ -107,7 +107,7 @@ def _sample_all_bands_at_point(mapname, e, n, band_count, sep="|", null_marker="
     if not line:
         return [None] * band_count
     cols = line[0].split(sep)
-    vals_raw = cols[-band_count:]         # last N columns are band values
+    vals_raw = cols[2:]             # first two values are coordinates
     vals = []
     for v in vals_raw:
         v = v.strip()
