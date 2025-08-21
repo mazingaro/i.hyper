@@ -27,6 +27,25 @@
 # % required: yes
 # %end
 
+# %flag
+# % key: p
+# % description: Plot spectra using matplotlib
+# %end
+
+# %option G_OPT_F_OUTPUT
+# % key: output
+# % required: no
+# % label: Output plot file (.png, .pdf, .svg). If not set and -p is given, shows an interactive window
+# %end
+
+# %option
+# % key: size
+# % type: string
+# % label: Size of output image as width,height in pixels (used only with output=)
+# % required: no
+# %end
+
+
 import sys
 import grass.script as gs
 import json, re
@@ -115,20 +134,58 @@ def _sample_at_3dpoint(mapname, e, n, z, sep="|", null_marker="*"):
     
     return out.strip().split(sep)[-1]
 
+def _plot_results(wavelengths, points, title=None, xlabel="Wavelength (nm)",
+                  ylabel="Value", output=None, size=None):
+    import numpy as np
+    import matplotlib
+    # Use a non-interactive backend if saving to file (no GUI required)
+    if output:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    wl = np.array([np.nan if w is None else float(w) for w in wavelengths], dtype=float)
+
+    fig, ax = plt.subplots()
+    for p in points:
+        vals = np.array([np.nan if v is None else float(v) for v in p["values"]], dtype=float)
+        mask = np.isfinite(wl) & np.isfinite(vals)
+        if not np.any(mask):
+            continue
+        ax.plot(wl[mask], vals[mask], label=f"E={p['x']:.3f}, N={p['y']:.3f}")
+
+    if title:
+        ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    if size and output:
+        # size="width,height" in pixels -> convert to inches at 100 dpi
+        try:
+            w_px, h_px = [int(s) for s in size.split(",")]
+            fig.set_size_inches(w_px / 100.0, h_px / 100.0)
+        except Exception:
+            pass
+
+    if output:
+        fig.savefig(output, bbox_inches="tight")
+    else:
+        plt.show()
+
 
 def main(options, flags):
-
     mapname = options["map"]
     coords_opt = options["coordinates"]  # list (multiple=yes)
     coords = coords_opt.split(",")
 
-    band_count   = _band_count(mapname)
-    wavelengths, fwhm  = _band_wavelengths(mapname, band_count)
-
-    results = []
+    band_count = _band_count(mapname)
+    wavelengths, fwhm = _band_wavelengths(mapname, band_count)
 
     if len(coords) % 2 != 0:
         gs.fatal("Coordinates list must contain an even number of values (E,N pairs)")
+
+    points = []
 
     for i in range(0, len(coords), 2):
         try:
@@ -137,21 +194,34 @@ def main(options, flags):
         except ValueError:
             gs.fatal(f"Non-numeric coordinate at position {i}: {coords[i]}, {coords[i+1]}")
 
+        # Single 2D r3.what call returns all bands at once
         values = _sample_all_bands_at_point(mapname, e, n, band_count)
 
-        # build results for this (E,N) across all bands
-        for j, val in enumerate(values):
-            results.append({
-                "point": {"x": e, "y": n},
-                "band_data": {
-                    "index": j + 1,
-                    "wavelength": wavelengths[j],
-                    "fwhm": fwhm[j]
-                },
-                "value": val
-            })
+        points.append({"x": e, "y": n, "values": values})
+
+    results = {
+        "map": mapname,
+        "wavelength_nm": wavelengths,
+        "points": points,
+    }
 
     print(json.dumps(results, ensure_ascii=False))
+
+    # Optional plotting (like g.gui.tplot pattern)
+    if flags.get("p") or options.get("output"):
+        title = f"Spectra @ {mapname}"
+        xlabel = "Wavelength (nm)"
+        ylabel = "Value"
+        _plot_results(
+            wavelengths=results["wavelength_nm"],
+            points=results["points"],
+            title=title,
+            xlabel=xlabel,
+            ylabel=ylabel,
+            output=options.get("output"),
+            size=options.get("size"),
+        )
+
 
 
 if __name__ == "__main__":
