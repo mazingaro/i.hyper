@@ -14,8 +14,11 @@ def suppress_stderr():
     fd, old = sys.stderr.fileno(), os.dup(sys.stderr.fileno())
     with open(os.devnull, 'w') as null:
         os.dup2(null.fileno(), fd)
-    try: yield
-    finally: os.dup2(old, fd); os.close(old)
+    try:
+        yield
+    finally:
+        os.dup2(old, fd)
+        os.close(old)
 
 def parse_band_metadata(meta_xml_path, tif_path, total_bands):
     tree = ET.parse(meta_xml_path)
@@ -39,9 +42,7 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
     with rasterio.open(tif_path) as src:
         for b in range(1, total_bands + 1):
             stats_valid = src.tags(b).get('STATISTICS_VALID_PERCENT')
-            valid = 1 if (b in expected and
-                         stats_valid and
-                         float(stats_valid) > 0) else 0
+            valid = 1 if (b in expected and stats_valid and float(stats_valid) > 0) else 0
             if b not in band_data:
                 band_data[b] = {"valid": valid}
             else:
@@ -59,7 +60,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
     with rasterio.open(tif_path) as src:
         total_bands = src.count
         band_meta = parse_band_metadata(meta_path, tif_path, total_bands)
-        
+
         valid_bands = [b for b in range(1, total_bands + 1) if band_meta[b].get('valid', 0) == 1]
         wavelengths = []
         band_names = []
@@ -74,14 +75,10 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
 
         rgb_target = COMPOSITES["RGB"]
         rgb_indices = [find_nearest_band(wl, wavelengths) for wl in rgb_target]
-        rgb_enhanced = {valid_bands[i-1]: band_names[i-1] for i in rgb_indices}
+        # map 1-based nearest indices -> map names (use indices consistently later)
+        rgb_enhanced = {i: band_names[i - 1] for i in rgb_indices}
 
-        if rgb_enhanced:
-            Module("i.colors.enhance",
-                   red=rgb_enhanced[rgb_indices[0]],
-                   green=rgb_enhanced[rgb_indices[1]],
-                   blue=rgb_enhanced[rgb_indices[2]],
-                   strength="98", flags="p", quiet=True)
+        # enhancement (96-crop) will be done per composite as requested: RGB with flag -p
         gs.use_temp_region()
         Module("g.region", raster=band_names[0], quiet=True)
 
@@ -90,7 +87,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
             for comp in composites:
                 if comp not in COMPOSITES:
                     continue
-                bands = [find_nearest_band(wl, wavelengths) for wl in COMPOSITES[comp]]
+                bands = [find_nearest_band(wl, wavelengths) for wl in COMPOSITES[comp]]  # 1-based
                 rgb_maps = []
                 for b in bands:
                     if b in rgb_enhanced:
@@ -99,9 +96,14 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                         rgb_maps.append(band_names[b - 1])
                 used_bands.update(rgb_maps)
 
-                Module("i.colors.enhance",
-                       red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
-                       strength="98", flags="p", quiet=True)
+                if comp.upper() == "RGB":
+                    Module("i.colors.enhance",
+                           red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
+                           strength="96", flags="p", quiet=True)
+                else:
+                    Module("i.colors.enhance",
+                           red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
+                           strength="96", quiet=True)
 
                 Module("r.composite",
                        red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
@@ -109,7 +111,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                 gs.info(f"Generated composite raster: {output}_{comp.lower()}")
 
         if custom_wavelengths:
-            custom_indices = [find_nearest_band(wl, wavelengths) for wl in custom_wavelengths]
+            custom_indices = [find_nearest_band(wl, wavelengths) for wl in custom_wavelengths]  # 1-based
             custom_maps = []
             for b in custom_indices:
                 if b in rgb_enhanced:
@@ -117,9 +119,10 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
                 else:
                     custom_maps.append(band_names[b - 1])
 
+            # custom: strength=96, no -p
             Module("i.colors.enhance",
                    red=custom_maps[0], green=custom_maps[1], blue=custom_maps[2],
-                   strength="98", flags="p", quiet=True)
+                   strength="96", quiet=True)
             Module("r.composite",
                    red=custom_maps[0], green=custom_maps[1], blue=custom_maps[2],
                    output=f"{output}_custom", quiet=True, overwrite=True)
@@ -140,7 +143,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None):
         for idx, b in enumerate(valid_bands, 1):
             meta = band_meta[b]
             desc.append(f"Band {idx}: {meta['wavelength']} nm, FWHM: {meta['fwhm']} nm")
-            Module("r.support", map=band_names[idx-1],
+            Module("r.support", map=band_names[idx - 1],
                    title=f"Band {b}", units="nm",
                    source1=f"Wavelength: {meta['wavelength']} nm",
                    source2=f"FWHM: {meta['fwhm']} nm",
@@ -161,7 +164,7 @@ def run_import(options, flags):
             if len(custom) != 3:
                 raise ValueError
         except Exception:
-            gs.fatal("Invalid format for composites_custom. Use: 850,1650,660")
+            gs.fatal("Invalid format for composites_custom. Usage example: 850,1650,660")
 
     import_enmap(
         options["input"],
