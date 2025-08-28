@@ -39,7 +39,7 @@
 # % type: string
 # % required: no
 # % multiple: yes
-# % options: RGB,CIR,SWIR
+# % options: RGB,CIR,SWIR-agriculture,SWIR-geology
 # % description: Composites to generate during import
 # % guisection: Optional
 # %end
@@ -48,6 +48,15 @@
 # % key: composites_custom
 # % type: string
 # % description: Wavelenghts for custom composites
+# % guisection: Optional
+# %end
+
+# %option
+# % key: strength
+# % type: integer
+# % required: no
+# % answer: 96
+# % description: Cropping intensity for i.colors.enhance (0-100)
 # % guisection: Optional
 # %end
 
@@ -73,16 +82,13 @@ def import_by_product(product, options, flags):
     module_name = PRODUCT_MODULE_MAP.get(product)
     if not module_name:
         gs.fatal(f"Unsupported product: {product}")
-
     path = get_lib_path(modname="i_hyper_lib", libname=module_name)
     if not path:
         gs.fatal(f"Library path for {module_name} not found.")
-
     sys.path.append(path)
     spec = importlib.util.find_spec(module_name)
     if not spec:
         gs.fatal(f"Module {module_name} not found at {path}")
-
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
