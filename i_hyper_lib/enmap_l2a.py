@@ -129,8 +129,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
         Module("r3.support", map=output,
                title="EnMAP L2A Hyperspectral Data",
                description="\n".join(desc),
-               unit="reflectance",
-               vunit="nm",
+               vunit="nanometers",
                quiet=True)
 
         gs.del_temp_region()

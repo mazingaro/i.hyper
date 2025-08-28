@@ -1,7 +1,7 @@
 <h2>DESCRIPTION</h2>
 <p>The purpose of <em>i.hyper.import</em> is to import hyperspectral imagery nto a GRASS GIS 3D raster format (<code>raster_3d</code>). It converts spectral image bands into an internally grouped 3D cube and attaches relevant per-band metadata: <strong>wavelength</strong>, <strong>FWHM</strong>, <strong>valid</strong> and <strong>unit</strong>.
 Currently only <strong>EnMAP L2A</strong> products—i</p>
-<p>Parameter <strong>input</strong> is a directory path pointing to an uncompressed EnMAP L2A product folder, which must contain both the <code>SPECTRAL_IMAGE.TIF</code> and the corresponding <code>METADATA.XML</code>.<br />
+<p>Parameter <strong>input</strong> is a directory path pointing to an uncompressed EnMAP L2A product folder which must contain both the <code>SPECTRAL_IMAGE.TIF</code> and the corresponding <code>METADATA.XML</code>.</p>
 Parameter <strong>output</strong> defines the base name for the output raster_3d map and all temporary bands.</p>
 <p>The module parses metadata, checks pixel values, finds unusable bands, and attaches all relevant spectral metadata into the final output cube.</p>
 <h2>NOTES</h2>

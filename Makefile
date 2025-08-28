@@ -7,6 +7,7 @@ SUBDIRS = i_hyper_lib \
 	i.hyper.preproc \
 	i.hyper.explore \
 	i.hyper.export \
+	i.hyper.composite \
 
 include $(MODULE_TOPDIR)/include/Make/Dir.make
 
