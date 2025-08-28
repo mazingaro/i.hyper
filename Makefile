@@ -3,6 +3,7 @@ MODULE_TOPDIR =../../..
 PGM = i.hyper
 
 SUBDIRS = i_hyper_lib \
+
 	i.hyper.import \
 	i.hyper.preproc \
 	i.hyper.explore \
