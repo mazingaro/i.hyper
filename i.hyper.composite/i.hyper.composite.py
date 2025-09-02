@@ -24,7 +24,7 @@
 # %option
 # % key: output
 # % type: string
-# % description: Output name prefix for composites (e.g., 'enmap' -> enmap_rgb, enmap_cir, ...)
+# % description: Output name prefix for composites
 # % required: yes
 # % guisection: Output
 # %end
