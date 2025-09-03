@@ -2,16 +2,10 @@
 
 ##############################################################################
 # MODULE:    i.hyper.preproc
-#
 # AUTHOR(S): Alen Mangafic <alen.mangafic@gis.si>
-#
 # PURPOSE:   Hyperspectral imagery preprocessing.
-#
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
-#
 ##############################################################################
-
-"""Hyperspectral imagery preprocessing"""
 
 # %module
 # % description: General hyperspectral data preprocessing
@@ -83,113 +77,127 @@ from scipy.signal import savgol_filter
 import grass.script as gs
 import grass.script.array as garray
 
-def fill_nans(spectrum):
-    valid = np.isfinite(spectrum)
-    if np.sum(valid) < 2:
-        return spectrum
-    x = np.arange(len(spectrum))
-    interp = interp1d(x[valid], spectrum[valid], kind='linear', fill_value='extrapolate')
-    return interp(x)
+# linear fill inside a spectrum for internal NaNs (used only with -q)
+def _fill_nans_1d(x):
+    v = np.asarray(x, dtype=np.float32)
+    m = np.isfinite(v)
+    if m.sum() < 2:
+        return v
+    xi = np.arange(v.size, dtype=np.float32)
+    f = interp1d(xi[m], v[m], kind="linear", fill_value="extrapolate", assume_sorted=True)
+    return f(xi).astype(np.float32)
 
-def savitzky_golay_filter(spectrum, window_length, polyorder,
-                          derivative_order=0, interpolate_nodata=False):
-    spectrum = np.asarray(spectrum, dtype=np.float32)
-    spectrum = np.where(spectrum < 0, 0, spectrum)
-    if interpolate_nodata:
-        spectrum = fill_nans(spectrum)
-    if np.any(np.isnan(spectrum)):
-        return np.full_like(spectrum, np.nan)
-    try:
-        return savgol_filter(spectrum, window_length, polyorder,
-                             deriv=derivative_order, mode='interp')
-    except ValueError as e:
-        gs.fatal(f"Savitzky-Golay error: {str(e)}")
+# Savitzky–Golay on one spectrum, respecting NaNs as no-data
+def _savgol_preserve_nan(spec, win, poly, deriv, interp_nodata):
+    s = np.asarray(spec, dtype=np.float32)
+    nanmask = ~np.isfinite(s)
 
-def copy_r3_metadata(input_raster, output_raster):
+    if interp_nodata:
+        s = _fill_nans_1d(s)
+        # any leading/trailing NaNs (pure no-data pixels) stay NaN:
+        s[nanmask] = np.nan
+
+    # run filter only on finite samples; keep NaNs as NaNs
+    out = np.full_like(s, np.nan, dtype=np.float32)
+    valid = np.isfinite(s)
+    if valid.sum() >= win:
+        out[valid] = savgol_filter(s[valid], win, poly, deriv=deriv, mode="interp").astype(np.float32)
+    else:
+        out[valid] = s[valid]
+    return out
+
+def _copy_r3_metadata(src, dst):
+    # copy history/title/description/vunit safely via a temp history file
     fd, tmp = tempfile.mkstemp(prefix="r3hist_", suffix=".txt")
     os.close(fd)
     with contextlib.suppress(FileNotFoundError):
         os.remove(tmp)
     try:
-        gs.run_command("r3.support", map=input_raster,
-                       savehistory=tmp, overwrite=True, quiet=True)
-        gs.run_command("r3.support", map=output_raster,
-                       loadhistory=tmp, overwrite=True, quiet=True)
+        gs.run_command("r3.support", map=src,  savehistory=tmp, overwrite=True, quiet=True)
+        gs.run_command("r3.support", map=dst, loadhistory=tmp, overwrite=True, quiet=True)
 
-        info_g = gs.parse_command("r3.info", flags="g", map=input_raster)
-        title = info_g.get("title")
-        vunit = info_g.get("vertical_unit")
+        gi = gs.parse_command("r3.info", flags="g", map=src)
+        title = gi.get("title")
+        vunit = gi.get("vertical_unit")
         if title:
-            gs.run_command("r3.support", map=output_raster, title=title, quiet=True)
+            gs.run_command("r3.support", map=dst, title=title, quiet=True)
         if vunit:
-            gs.run_command("r3.support", map=output_raster, vunit=vunit, quiet=True)
+            gs.run_command("r3.support", map=dst, vunit=vunit, quiet=True)
 
-        info_txt = gs.read_command("r3.info", map=input_raster)
-        desc_lines = []
-        in_desc = False
-        for line in info_txt.splitlines():
+        # copy multi-line description block (Data Description) if present
+        txt = gs.read_command("r3.info", map=src)
+        lines, grab = [], False
+        for line in txt.splitlines():
             s = line.rstrip()
             if s.strip().startswith("|   Data Description:"):
-                in_desc = True
+                grab = True
                 continue
-            if in_desc:
+            if grab:
                 if s.strip().startswith("|   Comments:"):
                     break
                 if s.startswith("|"):
                     content = s[1:].strip()
                     if content:
-                        desc_lines.append(content)
-        if desc_lines:
-            gs.run_command("r3.support", map=output_raster,
-                           description="\n".join(desc_lines), quiet=True)
+                        lines.append(content)
+        if lines:
+            gs.run_command("r3.support", map=dst, description="\n".join(lines), quiet=True)
     finally:
         with contextlib.suppress(Exception):
             os.remove(tmp)
 
-def preprocess_hyperspectral(input_raster, output_raster, window_length=11,
-                             polyorder=2, derivative_order=0,
-                             interpolate_nodata=False):
+def preprocess_hyperspectral(inp, out, window_length=11, polyorder=2,
+                             derivative_order=0, interpolate_nodata=False,
+                             clamp_negative=False):
     if window_length % 2 == 0:
         gs.fatal("Window length must be an odd number")
 
     gs.use_temp_region()
-    gs.run_command("g.region", raster_3d=input_raster)
+    gs.run_command("g.region", raster_3d=inp, quiet=True)
 
-    input_array = garray.array3d(input_raster)
-    depth, rows, cols = input_array.shape
+    # Read as float32 and treat GRASS NULL as NaN directly
+    arr_in = garray.array3d(mapname=inp, null="nan", dtype=np.float32)
+    depth, rows, cols = arr_in.shape
 
-    valid_bands = ~np.all(np.isnan(input_array), axis=(1, 2))
-    input_data = input_array[valid_bands, :, :]
-    if input_data.shape[0] == 0:
-        gs.fatal("No valid bands remaining after filtering")
+    # Exterior nodata mask (pixels that are NULL in ALL bands); keep them NULL
+    exterior_mask = ~np.any(np.isfinite(arr_in), axis=0)
 
-    spectra = input_data.reshape(input_data.shape[0], -1).T
-    filtered = np.apply_along_axis(
-        savitzky_golay_filter, 1, spectra,
-        window_length, polyorder,
-        derivative_order, interpolate_nodata
-    )
-    filtered_3d = filtered.T.reshape(input_data.shape[0], rows, cols)
+    flat = arr_in.reshape(depth, -1).T  # (rows*cols, depth)
 
-    output_array = garray.array3d()
-    output_array[...] = filtered_3d
-    output_array.write(mapname=output_raster, overwrite=True)
+    if clamp_negative:
+        flat = np.where(flat < 0, 0, flat).astype(np.float32)
 
-    copy_r3_metadata(input_raster, output_raster)
-    gs.run_command("g.region", raster_3d=output_raster)
+    flat_filt = np.apply_along_axis(
+        _savgol_preserve_nan, 1, flat,
+        window_length, polyorder, derivative_order, interpolate_nodata
+    ).astype(np.float32)
+
+    arr_out = flat_filt.T.reshape(depth, rows, cols)
+
+    # Reapply exterior NaNs (ensures transparent outside footprint)
+    arr_out[:, exterior_mask] = np.nan
+
+    out_arr = garray.array3d(dtype=np.float32)
+    out_arr[...] = arr_out
+    # Write with null=nan so NaNs become GRASS NULL in the result
+    out_arr.write(mapname=out, null="nan", overwrite=True)
+
+    _copy_r3_metadata(inp, out)
+    gs.run_command("g.region", raster_3d=out, quiet=True)
 
 def main():
     options, flags = gs.parser()
-    window_length = int(options["window_length"])
-    if window_length % 2 == 0:
+    wl = int(options["window_length"])
+    if wl % 2 == 0:
         gs.fatal("Window length must be an odd number")
+
     preprocess_hyperspectral(
-        input_raster=options["input"],
-        output_raster=options["output"],
-        window_length=window_length,
+        inp=options["input"],
+        out=options["output"],
+        window_length=wl,
         polyorder=int(options["polyorder"]),
         derivative_order=int(options["derivative_order"]),
-        interpolate_nodata=("q" in flags)
+        interpolate_nodata=("q" in flags),
+        clamp_negative=("z" in flags),
     )
 
 if __name__ == "__main__":
