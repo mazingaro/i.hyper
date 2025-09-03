@@ -151,7 +151,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
                    description="Validated band", quiet=True)
 
         Module("r3.support", map=output,
-               title="EnMAP L2A Hyperspectral Data",
+               title="EnMAP Hyperspectral Data",
                description="\n".join(desc),
                vunit="nanometers",
                quiet=True)
