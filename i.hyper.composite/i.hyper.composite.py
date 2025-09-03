@@ -3,12 +3,12 @@
 # MODULE:    i.hyper.composite
 # AUTHOR(S): Alen Mangafic <alen.mangafic@gis.si>
 # PURPOSE:   Create RGB/CIR/SWIR and custom false color composites
-#            from an existing hyperspectral 3D raster.
+#            from a hyperspectral 3D raster.
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
 ##############################################################################
 
 # %module
-# % description: Create RGB/CIR/SWIR and custom false color composites from an existing hyperspectral 3D raster.
+# % description: Create RGB/CIR/SWIR and custom false color composites from a hyperspectral 3D raster.
 # % keyword: imagery
 # % keyword: hyperspectral
 # % keyword: composite
@@ -123,8 +123,6 @@ def _enhance_and_composite(r, g, b, outname, strength, rgb_preserve):
                strength=str(strength), quiet=True)
     Module("r.composite", red=r, green=g, blue=b,
            output=outname, overwrite=True, quiet=True)
-
-# --- main ------------------------------------------------------------------
 
 def main():
     options, flags = gs.parser()
