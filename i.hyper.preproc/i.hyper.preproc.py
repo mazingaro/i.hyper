@@ -74,6 +74,9 @@
 # %end
 
 import sys
+import os
+import tempfile
+import contextlib
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
@@ -103,17 +106,45 @@ def savitzky_golay_filter(spectrum, window_length, polyorder,
         gs.fatal(f"Savitzky-Golay error: {str(e)}")
 
 def copy_r3_metadata(input_raster, output_raster):
-    tmp = gs.tempfile()
-    gs.run_command("r3.support", map=input_raster, savehistory=tmp, quiet=True)
-    gs.run_command("r3.support", map=output_raster, loadhistory=tmp, quiet=True)
-    info = gs.read_command("r3.info", map=input_raster)
-    title = None
-    for line in info.splitlines():
-        if line.strip().startswith("| Title:"):
-            title = line.split(":", 1)[1].strip()
-            break
-    if title:
-        gs.run_command("r3.support", map=output_raster, title=title, quiet=True)
+    fd, tmp = tempfile.mkstemp(prefix="r3hist_", suffix=".txt")
+    os.close(fd)
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(tmp)
+    try:
+        gs.run_command("r3.support", map=input_raster,
+                       savehistory=tmp, overwrite=True, quiet=True)
+        gs.run_command("r3.support", map=output_raster,
+                       loadhistory=tmp, overwrite=True, quiet=True)
+
+        info_g = gs.parse_command("r3.info", flags="g", map=input_raster)
+        title = info_g.get("title")
+        vunit = info_g.get("vertical_unit")
+        if title:
+            gs.run_command("r3.support", map=output_raster, title=title, quiet=True)
+        if vunit:
+            gs.run_command("r3.support", map=output_raster, vunit=vunit, quiet=True)
+
+        info_txt = gs.read_command("r3.info", map=input_raster)
+        desc_lines = []
+        in_desc = False
+        for line in info_txt.splitlines():
+            s = line.rstrip()
+            if s.strip().startswith("|   Data Description:"):
+                in_desc = True
+                continue
+            if in_desc:
+                if s.strip().startswith("|   Comments:"):
+                    break
+                if s.startswith("|"):
+                    content = s[1:].strip()
+                    if content:
+                        desc_lines.append(content)
+        if desc_lines:
+            gs.run_command("r3.support", map=output_raster,
+                           description="\n".join(desc_lines), quiet=True)
+    finally:
+        with contextlib.suppress(Exception):
+            os.remove(tmp)
 
 def preprocess_hyperspectral(input_raster, output_raster, window_length=11,
                              polyorder=2, derivative_order=0,
@@ -163,4 +194,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
