@@ -25,7 +25,10 @@ def suppress_stderr():
 def parse_band_metadata(meta_xml_path, tif_path, total_bands):
     tree = ET.parse(meta_xml_path)
     root = tree.getroot()
+
     band_data, expected = {}, set()
+
+    # wavelengths/FWHM from XML
     for band in root.findall(".//bandCharacterisation/bandID"):
         idx = int(band.attrib["number"])
         band_data[idx] = {
@@ -33,19 +36,32 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
             "fwhm": float(band.findtext("FWHMOfBand")),
             "valid": 0
         }
-    for path in [".//vnirProductQuality/expectedChannelsList",
-                 ".//swirProductQuality/expectedChannelsList"]:
+
+    # expected channels from XML (VNIR + SWIR)
+    for path in (".//vnirProductQuality/expectedChannelsList",
+                 ".//swirProductQuality/expectedChannelsList"):
         node = root.find(path)
         if node is not None and node.text:
-            expected.update(int(x.strip()) for x in node.text.split(","))
+            expected.update(int(x.strip()) for x in node.text.split(",") if x.strip())
+
+    # fallback: if XML doesn't list them, expect all bands
+    if not expected:
+        expected = set(range(1, total_bands + 1))
+
+    # validity: start from XML expected; only drop if stats explicitly say 0%
     with rasterio.open(tif_path) as src:
         for b in range(1, total_bands + 1):
-            stats_valid = src.tags(b).get('STATISTICS_VALID_PERCENT')
-            valid = 1 if (b in expected and stats_valid and float(stats_valid) > 0) else 0
-            if b not in band_data:
-                band_data[b] = {"valid": valid}
-            else:
-                band_data[b]["valid"] = valid
+            valid = 1 if b in expected else 0
+            sv = src.tags(b).get("STATISTICS_VALID_PERCENT")
+            if sv is not None:
+                try:
+                    if float(sv) <= 0:
+                        valid = 0
+                except Exception:
+                    pass
+            band_data.setdefault(b, {})
+            band_data[b]["valid"] = valid
+
     return band_data
 
 def find_nearest_band(wavelength, wavelengths):
@@ -57,7 +73,15 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
     with rasterio.open(tif_path) as src:
         total_bands = src.count
         band_meta = parse_band_metadata(meta_path, tif_path, total_bands)
-        valid_bands = [b for b in range(1, total_bands + 1) if band_meta[b].get('valid', 0) == 1]
+
+        # only bands marked valid and having wavelength metadata
+        valid_bands = [
+            b for b in range(1, total_bands + 1)
+            if band_meta.get(b, {}).get('valid', 0) == 1 and 'wavelength' in band_meta.get(b, {})
+        ]
+        if not valid_bands:
+            gs.fatal("No valid bands after XML-based selection.")
+
         wavelengths = []
         band_names = []
         for b in valid_bands:
@@ -80,7 +104,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
                 if comp not in COMPOSITES:
                     continue
                 bands = [find_nearest_band(wl, wavelengths) for wl in COMPOSITES[comp]]
-                rgb_maps = [rgb_enhanced[b] if b in rgb_enhanced else band_names[b - 1] for b in bands]
+                rgb_maps = [rgb_enhanced.get(b, band_names[b - 1]) for b in bands]
                 if comp.upper() == "RGB":
                     Module("i.colors.enhance", red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
                            strength=str(strength_val), flags="p", quiet=True)
@@ -94,7 +118,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
 
         if custom_wavelengths:
             custom_indices = [find_nearest_band(wl, wavelengths) for wl in custom_wavelengths]
-            custom_maps = [rgb_enhanced[b] if b in rgb_enhanced else band_names[b - 1] for b in custom_indices]
+            custom_maps = [rgb_enhanced.get(b, band_names[b - 1]) for b in custom_indices]
             Module("i.colors.enhance", red=custom_maps[0], green=custom_maps[1], blue=custom_maps[2],
                    strength=str(strength_val), quiet=True)
             Module("r.composite", red=custom_maps[0], green=custom_maps[1], blue=custom_maps[2],

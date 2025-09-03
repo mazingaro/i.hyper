@@ -75,7 +75,7 @@ from grass.script.utils import get_lib_path
 PRODUCT_MODULE_MAP = {
     "EnMAP-L2A": "enmap_l2a",
     "PRISMA L2B-C-D": "prisma_l2b_c_d",
-    "Hyperion": "hyperion"
+    "Hyperion": "hyperion",
 }
 
 def import_by_product(product, options, flags):
