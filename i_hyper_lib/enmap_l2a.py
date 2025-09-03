@@ -28,7 +28,7 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
 
     band_data, expected = {}, set()
 
-    # wavelengths/FWHM from XML
+    # wavelengths and FWHM from XML
     for band in root.findall(".//bandCharacterisation/bandID"):
         idx = int(band.attrib["number"])
         band_data[idx] = {
