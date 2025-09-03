@@ -56,7 +56,7 @@
 # % type: integer
 # % required: no
 # % answer: 96
-# % description: Cropping intensity for i.colors.enhance (0-100)
+# % description: Cropping intensity - upper brightness level (0-100)
 # % guisection: Optional
 # %end
 
