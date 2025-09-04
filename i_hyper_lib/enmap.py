@@ -25,30 +25,31 @@ def suppress_stderr():
 def parse_band_metadata(meta_xml_path, tif_path, total_bands):
     tree = ET.parse(meta_xml_path)
     root = tree.getroot()
-
     band_data, expected = {}, set()
 
-    # wavelengths and FWHM from XML
     for band in root.findall(".//bandCharacterisation/bandID"):
         idx = int(band.attrib["number"])
+        wl = band.findtext("wavelengthCenterOfBand")
+        fwhm = band.findtext("FWHMOfBand")
+        gain = band.findtext("GainOfBand")
+        off  = band.findtext("OffsetOfBand")
         band_data[idx] = {
-            "wavelength": float(band.findtext("wavelengthCenterOfBand")),
-            "fwhm": float(band.findtext("FWHMOfBand")),
+            "wavelength": float(wl) if wl is not None else None,
+            "fwhm": float(fwhm) if fwhm is not None else None,
+            "gain": float(gain) if gain is not None else None,
+            "offset": float(off) if off is not None else 0.0,
             "valid": 0
         }
 
-    # expected channels from XML (VNIR + SWIR)
     for path in (".//vnirProductQuality/expectedChannelsList",
                  ".//swirProductQuality/expectedChannelsList"):
         node = root.find(path)
         if node is not None and node.text:
             expected.update(int(x.strip()) for x in node.text.split(",") if x.strip())
 
-    # fallback: if XML doesn't list them, expect all bands
     if not expected:
         expected = set(range(1, total_bands + 1))
 
-    # validity: start from XML expected; only drop if stats explicitly say 0%
     with rasterio.open(tif_path) as src:
         for b in range(1, total_bands + 1):
             valid = 1 if b in expected else 0
@@ -59,8 +60,14 @@ def parse_band_metadata(meta_xml_path, tif_path, total_bands):
                         valid = 0
                 except Exception:
                     pass
-            band_data.setdefault(b, {})
+            band_data.setdefault(b, {"wavelength": None, "fwhm": None, "gain": None, "offset": 0.0})
             band_data[b]["valid"] = valid
+
+    for b in band_data:
+        if band_data[b]["gain"] is None:
+            band_data[b]["gain"] = 0.0001
+        if band_data[b]["offset"] is None:
+            band_data[b]["offset"] = 0.0
 
     return band_data
 
@@ -74,10 +81,9 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
         total_bands = src.count
         band_meta = parse_band_metadata(meta_path, tif_path, total_bands)
 
-        # only bands marked valid and having wavelength metadata
         valid_bands = [
             b for b in range(1, total_bands + 1)
-            if band_meta.get(b, {}).get('valid', 0) == 1 and 'wavelength' in band_meta.get(b, {})
+            if band_meta.get(b, {}).get('valid', 0) == 1 and band_meta.get(b, {}).get('wavelength') is not None
         ]
         if not valid_bands:
             gs.fatal("No valid bands after XML-based selection.")
@@ -92,6 +98,16 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
             band_names.append(bname)
             Module("r.colors", map=bname, color="grey.eq", quiet=True)
 
+        # per-band metadata BEFORE any cleanup 
+        for idx, b in enumerate(valid_bands, 1):
+            meta = band_meta[b]
+            Module("r.support", map=band_names[idx - 1],
+                   title=f"Band {b}", units="nm",
+                   source1=f"Wavelength: {meta['wavelength']} nm",
+                   source2=f"FWHM: {meta['fwhm']} nm",
+                   description="Validated band", quiet=True)
+
+        # composites
         rgb_target = COMPOSITES["RGB"]
         rgb_indices = [find_nearest_band(wl, wavelengths) for wl in rgb_target]
         rgb_enhanced = {i: band_names[i - 1] for i in rgb_indices}
@@ -125,6 +141,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
                    output=f"{output}_custom", quiet=True, overwrite=True)
             gs.info(f"Generated custom composite raster: {output}_custom")
 
+        # spectral axis
         wl = wavelengths
         if len(wl) > 1:
             diffs = [wl[i+1] - wl[i] for i in range(len(wl)-1)]
@@ -135,21 +152,43 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
         top_nm = bottom_nm + tbres_nm * (len(band_names) - 1)
 
         Module("g.region", raster=band_names[0], b=bottom_nm, t=top_nm, tbres=tbres_nm, quiet=True)
-        Module("r.to.rast3", input=band_names, output=output, quiet=True, overwrite=True)
-        Module("r3.mapcalc", expression=f"{output}_scaled = {output} / 10000.0", quiet=True, overwrite=True)
-        Module("g.remove", type="raster_3d", name=output, flags="f", quiet=True)
-        Module("g.rename", raster_3d=(f"{output}_scaled", output), quiet=True)
 
+        # gain/offset + FCELL
+        gains  = [band_meta[b]["gain"]   for b in valid_bands]
+        offs   = [band_meta[b]["offset"] for b in valid_bands]
+        same_gain   = all(g == gains[0] for g in gains)
+        same_offset = all(o == offs[0]  for o in offs)
+
+        float_names = []
+        try:
+            if same_gain and same_offset:
+                Module("r.to.rast3", input=band_names, output=output, quiet=True, overwrite=True)
+                g0, o0 = gains[0], offs[0]
+                Module("r3.mapcalc",
+                       expression=f"{output}_scaled = float({output} * {g0} + {o0})",
+                       quiet=True, overwrite=True)
+                Module("g.remove", type="raster_3d", name=output, flags="f", quiet=True)
+                Module("g.rename", raster_3d=(f"{output}_scaled", output), quiet=True)
+            else:
+                for idx, bname in enumerate(band_names):
+                    g = gains[idx]
+                    o = offs[idx]
+                    fout = f"{bname}_f"
+                    Module("r.mapcalc",
+                           expression=f"{fout} = float({bname} * {g} + {o})",
+                           quiet=True, overwrite=True)
+                    float_names.append(fout)
+                Module("r.to.rast3", input=float_names, output=output, quiet=True, overwrite=True)
+        finally:
+            if float_names:
+                Module("g.remove", type="raster", name=float_names, flags="f", quiet=True)
+            Module("g.remove", type="raster", name=band_names, flags="f", quiet=True)
+
+        # r3 metadata
         desc = ["Hyperspectral Metadata:", f"Valid Bands: {len(valid_bands)}"]
         for idx, b in enumerate(valid_bands, 1):
             meta = band_meta[b]
             desc.append(f"Band {idx}: {meta['wavelength']} nm, FWHM: {meta['fwhm']} nm")
-            Module("r.support", map=band_names[idx - 1],
-                   title=f"Band {b}", units="nm",
-                   source1=f"Wavelength: {meta['wavelength']} nm",
-                   source2=f"FWHM: {meta['fwhm']} nm",
-                   description="Validated band", quiet=True)
-
         Module("r3.support", map=output,
                title="EnMAP Hyperspectral Data",
                description="\n".join(desc),
@@ -157,7 +196,6 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
                quiet=True)
 
         gs.del_temp_region()
-        Module("g.remove", type="raster", name=band_names, flags="f", quiet=True)
 
 def run_import(options, flags):
     custom = None
