@@ -11,9 +11,9 @@
 # % keyword: imagery
 # %end
 
-# %option G_OPT_M_DIR
+# %option G_OPT_F_INPUT
 # % required: yes
-# % description: Path to the hyperspectral imagery.
+# % description: Path to the hyperspectral imagery: pick any file if the product is multi-file.
 # % guisection: Input
 # %end
 

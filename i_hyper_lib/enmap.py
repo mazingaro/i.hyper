@@ -98,7 +98,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
             band_names.append(bname)
             Module("r.colors", map=bname, color="grey.eq", quiet=True)
 
-        # per-band metadata BEFORE any cleanup 
+        # per-band metadata before any cleanup
         for idx, b in enumerate(valid_bands, 1):
             meta = band_meta[b]
             Module("r.support", map=band_names[idx - 1],
@@ -197,6 +197,12 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
 
         gs.del_temp_region()
 
+def _resolve_enmap_dir(path_like):
+    """Accept either a folder or any file in the EnMAP product folder."""
+    if os.path.isdir(path_like):
+        return path_like
+    return os.path.dirname(path_like)
+
 def run_import(options, flags):
     custom = None
     if options.get("composites_custom"):
@@ -216,8 +222,12 @@ def run_import(options, flags):
             gs.fatal("Invalid strength. Provide an integer 0-100.")
         if not (0 <= strength_val <= 100):
             gs.fatal("Invalid strength. Provide an integer 0-100.")
+
+    # directory from a file-or-folder input
+    folder = _resolve_enmap_dir(options["input"])
+
     import_enmap(
-        options["input"],
+        folder,
         options["output"],
         composites=[c.strip() for c in options["composites"].split(",")] if options.get("composites") else None,
         custom_wavelengths=custom,
