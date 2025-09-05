@@ -2,9 +2,9 @@
 
 ##############################################################################
 # MODULE:    i.hyper.explore
-# AUTHOR(S): Alen Mangafic <alen.mangafic@gis.si>
+# AUTHOR(S): Tomaz Zagar <tomaz.zagar@gis.si>
 # PURPOSE:   Visualize spectra from hyperspectral 3D raster maps.
-# COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
+# COPYRIGHT: (C) 2025 by Tomaz Zagar and the GRASS Development Team
 ##############################################################################
 
 # %module
