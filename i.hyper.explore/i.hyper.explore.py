@@ -30,13 +30,13 @@
 
 # %flag
 # % key: p
-# % description: Plot spectra using matplotlib
+# % description: Print JSON to stdout instead of plotting
 # %end
 
 # %option G_OPT_F_OUTPUT
 # % key: output
 # % required: no
-# % label: Output plot file (.png, .pdf, .svg). If not set and -p is given, shows an interactive window
+# % label: Output plot file (.png, .pdf, .svg). If not set, opens an interactive window
 # %end
 
 # %option
@@ -266,24 +266,23 @@ def main(options, flags):
             values = _sample_all_bands_at_point(mapname, e, n, band_count)
             points.append({"x": e, "y": n, "values": values})
 
-        datasets.append(
-            {"map": mapname, "wavelength_nm": wavelengths, "points": points}
-        )
+        datasets.append({"map": mapname, "wavelength_nm": wavelengths, "points": points})
 
-    # JSON to stdout
-    results = {"maps": [ds["map"] for ds in datasets], "datasets": datasets}
-    print(json.dumps(results, ensure_ascii=False))
+    # If -p (print) is given, emit JSON instead of plotting
+    if flags.get("p"):
+        results = {"maps": [ds["map"] for ds in datasets], "datasets": datasets}
+        print(json.dumps(results, ensure_ascii=False))
+        return
 
-    # Optional plotting
-    if flags.get("p") or options.get("output"):
-        _plot_results_multi(
-            datasets=datasets,
-            title="Spectra",
-            xlabel="Wavelength (nm)",
-            ylabel="Value",
-            output=options.get("output"),
-            size=options.get("size"),
-        )
+    # Default behavior: plot
+    _plot_results_multi(
+        datasets=datasets,
+        title="Spectra",
+        xlabel="Wavelength (nm)",
+        ylabel="Value",
+        output=options.get("output"),
+        size=options.get("size"),
+    )
 
 if __name__ == "__main__":
     options, flags = gs.parser()
