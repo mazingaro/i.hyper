@@ -1,268 +1,286 @@
 #!/usr/bin/env python3
-# PRISMA importer backend for i.hyper.import
+# PRISMA L2D → GRASS (2D reflectance; composite-only, EnMAP-style composite block)
+# - Same entrypoints: run_import() -> import_prisma(...)
+# - Writes float32 REFLECTANCE (0..1) to TEMP band maps, builds composites like EnMAP code does, then deletes temps
+# - Transpose to (E,N) before writing; region rows=E, cols=N
 
 import os
-import re
-import h5py
+import uuid
+import numpy as np
 import grass.script as gs
+import grass.script.array as garray
 from grass.pygrass.modules import Module
-from statistics import mean
-from contextlib import contextmanager
+
+from prisma_importer import load_prisma_l2d, concatenate_hyperspectral
 
 COMPOSITES = {
-    "RGB": [660, 572, 478],
-    "CIR": [848, 660, 572],
-    "SWIR-agriculture": [848, 1653, 660],
-    "SWIR-geology": [2200, 848, 572],
+    "RGB":              [660.0, 572.0, 478.0],
+    "CIR":              [848.0, 660.0, 572.0],
+    "SWIR-agriculture": [848.0, 1653.0, 660.0],
+    "SWIR-geology":     [2200.0, 848.0, 572.0],
 }
 
-@contextmanager
-def suppress_stderr():
-    import sys
-    fd, old = sys.stderr.fileno(), os.dup(sys.stderr.fileno())
-    try:
-        with open(os.devnull, "w") as null:
-            os.dup2(null.fileno(), fd)
-        yield
-    finally:
-        os.dup2(old, fd)
-        os.close(old)
+# -------------------------- helpers --------------------------
+def _require(cond, msg):
+    if not cond:
+        gs.fatal(msg)
 
-def _find_hco_swath(h5: h5py.File) -> str:
-    # Prefer *_HCO swath (co-registered hyperspectral cube)
-    swaths = h5.get("/HDFEOS/SWATHS")
-    if not isinstance(swaths, h5py.Group):
-        gs.fatal("PRISMA HE5: /HDFEOS/SWATHS group not found.")
-    for name in swaths:
-        if re.search(r"_HCO$", name):
-            return f"/HDFEOS/SWATHS/{name}"
-    # Fallback: first swath that has VNIR_Cube under "Data Fields"
-    for name in swaths:
-        base = f"/HDFEOS/SWATHS/{name}/Data Fields"
-        if base in h5 and "VNIR_Cube" in h5[base]:
-            return f"/HDFEOS/SWATHS/{name}"
-    gs.fatal("No PRISMA swath with VNIR_Cube found.")
+def _resolve_he5(path_like):
+    if os.path.isdir(path_like):
+        for n in os.listdir(path_like):
+            if n.lower().endswith(".he5"):
+                return os.path.join(path_like, n)
+        gs.fatal("No .he5 file found in the provided folder.")
+    return path_like
 
-def _get_attr_anywhere(swath_group: h5py.Group, key: str, default=None):
-    # Search on swath, "Data Fields", and the VNIR/SWIR datasets
-    if key in swath_group.attrs:
-        return swath_group.attrs[key]
-    df = swath_group.get("Data Fields")
-    if isinstance(df, h5py.Group) and key in df.attrs:
-        return df.attrs[key]
-    for dname in ("VNIR_Cube", "SWIR_Cube"):
-        d = df.get(dname) if isinstance(df, h5py.Group) else None
-        if isinstance(d, h5py.Dataset) and key in d.attrs:
-            return d.attrs[key]
-    return default
+def _find_nearest_band_1based(target_nm, wavelengths_nm):
+    wl = np.asarray(wavelengths_nm, dtype=np.float32)
+    return int(np.argmin(np.abs(wl - float(target_nm)))) + 1  # 1-based
 
-def _read_prisma_meta(he5_path: str):
-    with h5py.File(he5_path, "r") as f:
-        swath = _find_hco_swath(f)
-        g = f[swath]
+def _temp_name(prefix):
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
-        df = g.get("Data Fields")
-        if not isinstance(df, h5py.Group):
-            gs.fatal(f"'{swath}/Data Fields' not found (note the space).")
+# -------------------------- region --------------------------
+def _compute_edges_from_centers(ul_e, ul_n, ur_e, ur_n, ll_e, ll_n, rows, cols):
+    """
+    Edges from pixel-center corners.
+    Called with rows=E (UL→LL samples) and cols=N (UL→UR samples) AFTER transposing.
+    """
+    if any(v is None for v in (ul_e, ul_n, ur_e, ur_n, ll_e, ll_n)):
+        gs.fatal("PRISMA corners missing (need UL, UR, LL).")
+    if rows < 2 or cols < 2:
+        gs.fatal("Invalid raster shape (<2).")
 
-        # Shapes are (lines, bands, samples) per your listing
-        if "VNIR_Cube" not in df or "SWIR_Cube" not in df:
-            gs.fatal("VNIR_Cube or SWIR_Cube dataset missing in Data Fields.")
-        shape_v = df["VNIR_Cube"].shape
-        shape_s = df["SWIR_Cube"].shape
-        n_vnir = shape_v[1]  # bands are at index 1
-        n_swir = shape_s[1]  # bands are at index 1
+    ew_c2c = (ur_e - ul_e) / float(cols - 1)   # columns axis = easting
+    ns_c2c = (ul_n - ll_n) / float(rows - 1)   # rows axis = northing
 
-        # Wavelengths / FWHM (nm) from attributes
-        wl_v = _get_attr_anywhere(g, "List_Cw_Vnir")
-        wl_s = _get_attr_anywhere(g, "List_Cw_Swir")
-        fw_v = _get_attr_anywhere(g, "List_Fwhm_Vnir")
-        fw_s = _get_attr_anywhere(g, "List_Fwhm_Swir")
+    west  = ul_e - 0.5 * ew_c2c
+    east  = ur_e + 0.5 * ew_c2c
+    north = ul_n + 0.5 * ns_c2c
+    south = ll_n - 0.5 * ns_c2c
+    return west, east, south, north
 
-        wl_v = [float(x) for x in wl_v] if wl_v is not None else []
-        wl_s = [float(x) for x in wl_s] if wl_s is not None else []
-        fw_v = [float(x) for x in fw_v] if fw_v is not None else []
-        fw_s = [float(x) for x in fw_s] if fw_s is not None else []
+def _force_region_exact_for_transposed(geo, rows_E, cols_N):
+    west, east, south, north = _compute_edges_from_centers(
+        geo.ul_e, geo.ul_n, geo.ur_e, geo.ur_n, geo.ll_e, geo.ll_n,
+        rows=rows_E, cols=cols_N
+    )
+    gs.run_command("g.region", w=west, e=east, s=south, n=north, quiet=True)
+    gs.run_command("g.region", rows=rows_E, cols=cols_N, quiet=True)
+    reg = gs.region()
+    if int(reg["rows"]) != rows_E or int(reg["cols"]) != cols_N:
+        gs.fatal(f"Region is {reg['rows']}x{reg['cols']} but transposed data is {rows_E}x{cols_N}")
 
-        # Scale/offset (radiance or reflectance): value = DN/Scale - Offset
-        # If absent, fall back to 10000 / 0 and warn.
-        def _num(x, dflt):
-            try:
-                return float(x)
-            except Exception:
-                return dflt
+# -------------------------- writers --------------------------
+def _write_float_raster(name, data_2d_float32):
+    arr = garray.array(dtype=np.float32)
+    arr[:, :] = data_2d_float32
+    arr.write(name, overwrite=True)
 
-        sv = _get_attr_anywhere(g, "ScaleFactor_Vnir")
-        ov = _get_attr_anywhere(g, "Offset_Vnir")
-        ss = _get_attr_anywhere(g, "ScaleFactor_Swir")
-        os_ = _get_attr_anywhere(g, "Offset_Swir")
+# -------------------------- public core --------------------------
+def import_prisma(input_path, output_name, composites=None, custom_wavelengths=None, strength_val=96, import_null=False):
+    """
+    Writes composite rasters (only) following the EnMAP composite flow:
+      - pick nearest bands by wavelength,
+      - enhance RGB with -p flag, others without,
+      - build composite from three band maps,
+      - only final composites remain (temp bands removed).
+    Reflectance is float32; per-band temp rasters are created on demand and reused across composites.
+    """
+    he5 = _resolve_he5(input_path)
+    prod = load_prisma_l2d(he5, load_pan=False, compute_utm=False)
 
-        scale_v = _num(sv, 10000.0)
-        off_v   = _num(ov, 0.0)
-        scale_s = _num(ss, 10000.0)
-        off_s   = _num(os_, 0.0)
+    _require(prod.hco_geo is not None, "HCO geolocation missing.")
+    _require(prod.vnir and prod.vnir.dn is not None, "VNIR cube missing.")
+    _require(prod.swir and prod.swir.dn is not None, "SWIR cube missing.")
 
-        if sv is None or ss is None:
-            gs.message("PRISMA: ScaleFactor attribute missing, using 10000.0 as default.")
-        if ov is None or os_ is None:
-            gs.message("PRISMA: Offset attribute missing, using 0.0 as default.")
+    # Reflectance cube (N,E,B) and wavelengths
+    # NOTE: capturing fwhm as well for r3 metadata compatibility with EnMAP
+    refl, wavelengths, fwhm = concatenate_hyperspectral(prod)  # float32 0..1
+    _require(refl.ndim == 3, f"Unexpected reflectance shape: {refl.shape}")
 
-    # CORRECT GDAL subdataset path format
-    # GDAL expects: HDF5:"filename"://path/to/dataset
-    # Remove leading slash and use proper HDF5 path structure
-    swath_path = swath.lstrip('/')
-    vnir_path = f'{swath_path}/Data Fields/VNIR_Cube'
-    swir_path = f'{swath_path}/Data Fields/SWIR_Cube'
-    
-    return {
-        "swath": swath,
-        "vnir_sds": f'HDF5:"{he5_path}"://{vnir_path}',
-        "swir_sds": f'HDF5:"{he5_path}"://{swir_path}',
-        "shape_vnir": shape_v, "shape_swir": shape_s,
-        "n_vnir": n_vnir, "n_swir": n_swir,
-        "wl_vnir": wl_v, "wl_swir": wl_s,
-        "fwhm_vnir": fw_v, "fwhm_swir": fw_s,
-        "scale_vnir": scale_v, "off_vnir": off_v,
-        "scale_swir": scale_s, "off_swir": off_s,
-    }
+    # Determine transposed shape (E,N) from any band
+    first_band = refl[:, :, 0].T                # (E,N)
+    rows_E, cols_N = first_band.shape
 
-def _nearest_idx(wl_target, wl_list):
-    return min(range(len(wl_list)), key=lambda i: abs(wl_list[i] - wl_target)) if wl_list else None
+    # Fix region exactly to transposed shape and metadata extents
+    gs.use_temp_region()
+    _force_region_exact_for_transposed(prod.hco_geo, rows_E, cols_N)
 
-def _export_band_to_fcell(subdataset: str, band_idx: int, base: str, scale: float, offset: float) -> str:
-    """Link one band via r.external, then scale to FCELL with r.mapcalc float()."""
-    raw = f"{base}_b{band_idx:03d}"
-    
-    # First test if GDAL can read the subdataset
-    try:
-        with suppress_stderr():
-            # Test with gdalinfo first to see if the subdataset is accessible
-            test_cmd = f'gdalinfo "{subdataset}"'
-            gs.run_command('bash', '-c', test_cmd, quiet=True)
-    except:
-        gs.fatal(f"Cannot access subdataset: {subdataset}")
-    
-    with suppress_stderr():
-        Module("r.external", input=subdataset, output=raw, band=band_idx, flags="o", quiet=True, overwrite=True)
-    fout = f"{raw}_f"
-    # FCELL expression
-    Module("r.mapcalc", expression=f"{fout}=float({raw}/{scale} - {offset})", quiet=True, overwrite=True)
-    # Clean the GDAL link
-    Module("g.remove", type="raster", name=raw, flags="f", quiet=True)
-    return fout
-
-def _stack_to_r3(band_maps, out3d):
-    # Do NOT touch user's region settings
-    Module("r.to.rast3", input=band_maps, output=out3d, quiet=True, overwrite=True)
-
-def import_prisma(file_path, output, composites=None, custom_wavelengths=None, strength_val=96, keep_all_null=False):
-    if not os.path.isfile(file_path):
-        gs.fatal(f"Input is not a file: {file_path}")
-
-    meta = _read_prisma_meta(file_path)
-    gs.message(f"VNIR subdataset: {meta['vnir_sds']}")
-    gs.message(f"SWIR subdataset: {meta['swir_sds']}")
-
-    # Build VNIR then SWIR band list
-    band_maps = []
-    wavelengths = []
-
-    # VNIR
-    gs.message(f"Importing {meta['n_vnir']} VNIR bands...")
-    for b in range(1, meta["n_vnir"] + 1):
-        try:
-            fout = _export_band_to_fcell(meta["vnir_sds"], b, output, meta["scale_vnir"], meta["off_vnir"])
-            band_maps.append(fout)
-            if b - 1 < len(meta["wl_vnir"]):
-                wavelengths.append(meta["wl_vnir"][b - 1])
-        except Exception as e:
-            gs.warning(f"Failed to import VNIR band {b}: {e}")
-            continue
-
-    # SWIR
-    gs.message(f"Importing {meta['n_swir']} SWIR bands...")
-    for b in range(1, meta["n_swir"] + 1):
-        try:
-            fout = _export_band_to_fcell(meta["swir_sds"], b, output, meta["scale_swir"], meta["off_swir"])
-            band_maps.append(fout)
-            if b - 1 < len(meta["wl_swir"]):
-                wavelengths.append(meta["wl_swir"][b - 1])
-        except Exception as e:
-            gs.warning(f"Failed to import SWIR band {b}: {e}")
-            continue
-
-    if not band_maps:
-        gs.fatal("No bands were successfully imported.")
-
-    # Optionally drop all-NULL bands
-    if not keep_all_null:
-        keep_maps, keep_wls = [], []
-        for i, m in enumerate(band_maps):
-            info = gs.parse_command("r.info", flags="r", map=m)
-            if not (info.get("min") is None and info.get("max") is None):
-                keep_maps.append(m)
-                if i < len(wavelengths):
-                    keep_wls.append(wavelengths[i])
-        band_maps, wavelengths = keep_maps, keep_wls
-        if not band_maps:
-            gs.fatal("All bands are NULL after scaling.")
-
-    # Composites (no region changes)
+    # Build list of composites to make (default RGB)
+    wanted = []
     if composites:
-        def pick_maps(wls):
-            idxs = []
-            for wl in wls:
-                i = _nearest_idx(wl, wavelengths)
-                if i is None:
-                    gs.fatal("Wavelength list missing.")
-                idxs.append(i)
-            return [band_maps[i] for i in idxs]
-        
         for comp in composites:
-            if comp not in COMPOSITES:
-                continue
-            r, g, b = pick_maps(COMPOSITES[comp])
-            if comp.upper() == "RGB":
-                Module("i.colors.enhance", red=r, green=g, blue=b, strength=str(strength_val), flags="p", quiet=True)
+            compu = comp.strip().upper()
+            if compu in COMPOSITES:
+                wanted.append((compu, COMPOSITES[compu]))
+    else:
+        wanted.append(("RGB", COMPOSITES["RGB"]))
+
+    if custom_wavelengths:
+        if len(custom_wavelengths) != 3:
+            gs.fatal("Custom composites must provide exactly 3 wavelengths (e.g., 850,1650,660)")
+        wanted.append(("CUSTOM", [float(x) for x in custom_wavelengths]))
+
+    # --- EnMAP-style band handling:
+    # We'll create temp rasters only for bands we need, and reuse them via a dict keyed by 1-based band index.
+    temp_bands = {}  # {band_idx_1based: raster_name}
+    created_names = []  # for final cleanup
+
+    def ensure_band_written(idx1):
+        """Write reflectance band idx1 (1-based) as a temp raster (E,N) if not already created."""
+        if idx1 in temp_bands:
+            return temp_bands[idx1]
+        # Extract band; refl is (N,E,B) with 0-based k
+        k = idx1 - 1
+        band_EN = refl[:, :, k].T.astype(np.float32)
+        name = _temp_name(f"{output_name}_b{idx1:03d}")
+        _write_float_raster(name, band_EN)
+        temp_bands[idx1] = name
+        created_names.append(name)
+        return name
+
+    # Prime the "rgb_enhanced" mapping exactly like EnMAP:
+    rgb_target = COMPOSITES["RGB"]
+    rgb_indices_1b = [_find_nearest_band_1based(w, wavelengths) for w in rgb_target]
+    # Create these bands now and cache
+    for idx1 in rgb_indices_1b:
+        ensure_band_written(idx1)
+    rgb_enhanced = {idx1: temp_bands[idx1] for idx1 in rgb_indices_1b}
+
+    # -------------------------- build full hyperspectral 3D cube (all bands) --------------------------
+    try:
+        bands_total = int(refl.shape[2])
+
+        # 1) Peg 2D region to an existing temp band (guarantees XY extents & 2D res match slices)
+        ref_map_for_region = next(iter(rgb_enhanced.values()))
+        Module("g.region", raster=ref_map_for_region, quiet=True)
+
+        # 2) Read the (now pegged) 2D region to mirror its XY resolutions into the 3D region
+        reg2d = gs.region()
+        nsres2d = float(reg2d["nsres"])
+        ewres2d = float(reg2d["ewres"])
+
+        # -------- spectral (Z) axis in nanometers like EnMAP --------
+        if wavelengths is not None and len(wavelengths) > 0:
+            wl = np.asarray(wavelengths, dtype=float)
+            if wl.size > 1:
+                # Use exact spacing from endpoints (sum of diffs) to avoid accumulating FP error
+                tbres_nm = float((wl[-1] - wl[0]) / (bands_total - 1))
             else:
-                Module("i.colors.enhance", red=r, green=g, blue=b, strength=str(strength_val), quiet=True)
-            outname = f"{output}_{comp.lower().replace('-', '_')}"
-            Module("r.composite", red=r, green=g, blue=b, output=outname, quiet=True, overwrite=True)
-            gs.info(f"Generated composite raster: {outname}")
+                tbres_nm = 1.0
+            bottom_nm = float(wl[0])
+            # IMPORTANT: GRASS depth behaves like depth = int((t - b) / tbres)
+            # so we set t = b + tbres * bands_total to get depth == bands_total
+            top_nm = bottom_nm + tbres_nm * bands_total  # <-- fix off-by-one
+        else:
+            bottom_nm, top_nm, tbres_nm = 0.0, float(bands_total), 1.0
 
-    # Stack -> 3D
-    _stack_to_r3(band_maps, output)
+        # 3) Set ONLY 3D params: mirror XY resolutions and define Z (bottom/top/tbres)
+        #    NOTE: rows3/cols3 DO NOT EXIST; they are derived from extents + nsres3/ewres3.
+        gs.run_command(
+            "g.region",
+            nsres3=nsres2d,
+            ewres3=ewres2d,
+            b=0,
+            t=bands_total,
+            tbres=1,
+            quiet=True,
+        )
 
-    # Per-band metadata on 2D rasters and volume description
-    desc = ["Hyperspectral Metadata:", f"Valid Bands: {len(wavelengths)}"]
+        # 4) Create and fill the 3D array: (band, row(E), col(N))
+        cube = garray.array3d(dtype=np.float32)
+        for k in range(bands_total):
+            cube[k, :, :] = refl[:, :, k].T.astype(np.float32)
 
-    # Prepare FWHM lookup aligned with our VNIR+SWIR concatenation
-    fwhm_all = (meta["fwhm_vnir"] or []) + (meta["fwhm_swir"] or [])
-    for i, m in enumerate(band_maps, 1):
-        wl = wavelengths[i - 1] if i - 1 < len(wavelengths) else None
-        fwhm = fwhm_all[i - 1] if i - 1 < len(fwhm_all) else None
-        desc.append(f"Band {i}: {wl} nm, FWHM: {fwhm} nm")
-        title = f"Band {i}"
-        s1 = f"Wavelength: {wl} nm" if wl is not None else ""
-        s2 = f"FWHM: {fwhm} nm" if fwhm is not None else ""
-        Module("r.support", map=m, title=title, units="nm", source1=s1, source2=s2,
-               description="PRISMA band", quiet=True)
+        # write 3D raster under the final output name (compat with EnMAP)
+        cube.write(mapname=f"{output_name}", overwrite=True)
+        gs.info(f"Created 3D raster cube with all bands: {output_name} ({bands_total} slices).")
 
-    Module("r3.support", map=output,
-           title="PRISMA Hyperspectral Data",
-           description="\n".join(desc),
-           vunit="nanometers", quiet=True)
+        # -------- r3 metadata to match EnMAP's r3.support pattern --------
+        try:
+            count_meta = int(min(bands_total, len(wavelengths)))
+            desc_lines = ["Hyperspectral Metadata:", f"Valid Bands: {count_meta}"]
+            # Use 1-based band indices like EnMAP metadata
+            for i in range(count_meta):
+                wl_i = float(wavelengths[i])
+                fwhm_i = float(fwhm[i]) if i < len(fwhm) else float("nan")
+                desc_lines.append(f"Band {i+1}: {wl_i} nm, FWHM: {fwhm_i} nm")
+            Module("r3.support",
+                   map=output_name,
+                   title="PRISMA Hyperspectral Data",
+                   description="\n".join(desc_lines),
+                   vunit="nanometers",
+                   quiet=True)
+        except Exception as e_meta:
+            gs.warning(f"Failed to write r3 metadata: {e_meta}")
+        # -----------------------------------------------------------------
+    except Exception as e:
+        gs.warning(f"3D cube creation failed: {e}")
+    # -------------------------------------------------------------------------------------------------------
 
-    # Clean 2D FCELL rasters after stacking
-    Module("g.remove", type="raster", name=band_maps, flags="f", quiet=True)
+    # For each requested composite, select bands and build r.composite
+    for name, targets in wanted:
+        bands_1b = [_find_nearest_band_1based(w, wavelengths) for w in targets]
+        # EnMAP logic: reuse enhanced RGB maps when available, otherwise fallback to band rasters
+        rgb_maps = []
+        for idx1 in bands_1b:
+            if idx1 in rgb_enhanced:
+                rgb_maps.append(rgb_enhanced[idx1])
+            else:
+                rgb_maps.append(ensure_band_written(idx1))
 
+        # EnMAP: set region to first map and enhance (RGB with -p, others normal)
+        Module("g.region", raster=rgb_maps[0], quiet=True)
+        if name.upper() == "RGB":
+            Module("i.colors.enhance", red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
+                   strength=str(strength_val), flags="p", quiet=True)
+            outname = f"{output_name}_{name.lower().replace('-', '_')}"
+        else:
+            Module("i.colors.enhance", red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
+                   strength=str(strength_val), quiet=True)
+            outname = f"{output_name}_{name.lower().replace('-', '_')}"
+
+        Module("r.composite", red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
+               output=outname, quiet=True, overwrite=True)
+        gs.info(f"Generated composite raster: {outname}")
+
+    # Clean up temp bands after all composites are made
+    if created_names:
+        Module("g.remove", type="raster", name=",".join(created_names), flags="f", quiet=True)
+
+    gs.del_temp_region()
+
+# -------------------------- entry (same) --------------------------
 def run_import(options, flags):
+    custom = None
+    if options.get("composites_custom"):
+        try:
+            custom = [float(x.strip()) for x in options["composites_custom"].split(",")]
+            if len(custom) != 3:
+                raise ValueError
+        except Exception:
+            gs.fatal("Invalid format for composites_custom. Usage example: 850,1650,660")
+
+    strength_opt = options.get("strength")
+    if strength_opt is None or str(strength_opt).strip() == "":
+        strength_val = 96
+    else:
+        try:
+            strength_val = int(str(strength_opt).strip())
+        except Exception:
+            gs.fatal("Invalid strength. Provide an integer 0-100.")
+        if not (0 <= strength_val <= 100):
+            gs.fatal("Invalid strength. Provide an integer 0-100.")
+
+    comps = [c.strip() for c in options["composites"].split(",")] if options.get("composites") else None
+    import_null = bool(flags.get("n"))
+
     import_prisma(
-        file_path=options["input"],
-        output=options["output"],
-        composites=[c.strip() for c in options["composites"].split(",")] if options.get("composites") else None,
-        custom_wavelengths=([float(x.strip()) for x in options["composites_custom"].split(",")]
-                            if options.get("composites_custom") else None),
-        strength_val=int(options.get("strength") or 96),
-        keep_all_null=("n" in flags),
+        input_path=options["input"],
+        output_name=options["output"],
+        composites=comps,
+        custom_wavelengths=custom,
+        strength_val=strength_val,
+        import_null=import_null,
     )
