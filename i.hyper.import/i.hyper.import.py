@@ -74,7 +74,7 @@ from grass.script.utils import get_lib_path
 
 PRODUCT_MODULE_MAP = {
     "EnMAP": "enmap",
-    #"PRISMA": "prisma",
+    "PRISMA": "prisma",
     #"Tanager-1": "tanager",
     #"Hyperion": "hyperion",
 }
