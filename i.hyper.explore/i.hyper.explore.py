@@ -178,6 +178,14 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
             mask = np.isfinite(wl) & np.isfinite(vals)
             if not np.any(mask):
                 continue
+
+            #sort by wavelength to avoid wrap-around connection
+            wl = wl[mask]
+            vals = vals[mask]
+            order = np.argsort(wl)
+            wl = wl[order]
+            vals = vals[order]
+
             ls = linestyles[mi % len(linestyles)]
             ax.plot(wl[mask], vals[mask], linestyle=ls, color=color, linewidth=1.6)
 
