@@ -3,6 +3,7 @@ import numpy as np
 from scipy.signal import savgol_filter
 from scipy.interpolate import interp1d
 
+# called by i.hyper.preproc
 def _savgol_preserve_nan(spec, win, poly, deriv, interp_nodata):
     s = np.asarray(spec, dtype=np.float32)
     nanmask = ~np.isfinite(s)
