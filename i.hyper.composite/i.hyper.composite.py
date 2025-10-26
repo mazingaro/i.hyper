@@ -74,16 +74,13 @@ def _band_count(mapname):
     return d
 
 def _band_wavelengths_from_comments(mapname, expected):
-    """Parse wavelengths (and optional FWHM) from r3.info human block."""
     txt = gs.read_command("r3.info", map=mapname)
     wavelengths = [None] * expected
-
     num = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
     pat = re.compile(
         rf"Band\s+(\d+)\s*:\s*({num})\s*nm(?:,\s*FWHM:\s*({num})\s*nm)?",
         re.IGNORECASE
     )
-
     for line in txt.splitlines():
         line = line.strip()
         if line.startswith("|"):
@@ -93,26 +90,29 @@ def _band_wavelengths_from_comments(mapname, expected):
             idx = int(m.group(1))
             if 1 <= idx <= expected:
                 wavelengths[idx - 1] = float(m.group(2))
-
     if any(w is None for w in wavelengths):
         missing = [i+1 for i,w in enumerate(wavelengths) if w is None]
         gs.fatal(f"Missing wavelengths in r3.info comments for bands: {missing[:10]}{'...' if len(missing)>10 else ''}")
     return wavelengths
 
 def _explode_cube(cube, tmpbase):
-    """Create per-band rasters with r3.to.rast and return the ordered list."""
-    Module("r3.to.rast", input=cube, output=tmpbase, overwrite=True, quiet=True)
-    maps = gs.read_command("g.list", type="raster", pattern=f"{tmpbase}*").strip().split()
-    if not maps:
-        gs.fatal("No 2D rasters were produced by r3.to.rast")
-    maps.sort()
-    return maps
+    """Explode cube into 2D rasters using a temporary 3D region."""
+    Module("g.region", save="__tmp_orig_region__", quiet=True)
+    try:
+        Module("g.region", raster_3d=cube, quiet=True)
+        Module("r3.to.rast", input=cube, output=tmpbase, overwrite=True, quiet=True)
+        maps = gs.read_command("g.list", type="raster", pattern=f"{tmpbase}*").strip().split()
+        if not maps:
+            gs.fatal("No 2D rasters were produced by r3.to.rast")
+        maps.sort(key=lambda m: int(re.search(r'(\d+)$', m).group(1)))
+        return maps
+    finally:
+        Module("g.region", region="__tmp_orig_region__", quiet=True)
+        Module("g.remove", type="region", name="__tmp_orig_region__", flags="f", quiet=True)
 
 def _nearest_index(target_nm, wavelengths):
-    # 1-based index
     diffs = [abs(w - target_nm) for w in wavelengths]
-    i = diffs.index(min(diffs)) + 1
-    return i
+    return diffs.index(min(diffs))  # 0-based
 
 def _enhance_and_composite(r, g, b, outname, strength, rgb_preserve):
     if rgb_preserve:
@@ -134,16 +134,16 @@ def main():
     try:
         strength = int(options.get("strength") or 96)
     except Exception:
-        gs.fatal("Invalid strength. Provide an integer 0-100.")
+        gs.fatal("Invalid strength. Provide an integer 0–100.")
     if not (0 <= strength <= 100):
-        gs.fatal("Invalid strength. Provide an integer 0-100.")
+        gs.fatal("Invalid strength. Provide an integer 0–100.")
 
     requested = []
     if comps:
         requested = [c.strip() for c in comps.split(",") if c.strip()]
         for c in requested:
             if c not in COMPOSITES:
-                gs.fatal(f"Unknown composite '{c}'. Allowed: {','.join(COMPOSITES.keys())}")
+                gs.fatal(f"Unknown composite '{c}'. Allowed: {', '.join(COMPOSITES.keys())}")
 
     custom_wl = None
     if custom:
@@ -152,18 +152,24 @@ def main():
             if len(custom_wl) != 3:
                 raise ValueError
         except Exception:
-            gs.fatal("Invalid composites_custom. Use wavelenghts that your data contains in such way: 850,1650,660")
+            gs.fatal("Invalid composites_custom. Use format like 850,1650,660")
 
     band_count = _band_count(cube)
+    if band_count < 3:
+        gs.fatal(f"{cube} contains only {band_count} band(s). Cannot build composites.")
     wavelengths = _band_wavelengths_from_comments(cube, band_count)
 
     tmpbase = f"_ihc_{uuid.uuid4().hex[:8]}_b_"
     maps = _explode_cube(cube, tmpbase)
 
+    if len(maps) != band_count:
+        gs.warning(f"Expected {band_count} bands, got {len(maps)}. Using available maps only.")
+        maps = maps[:min(len(maps), band_count)]
+
     try:
         def map_for_nm(nm):
-            idx = _nearest_index(nm, wavelengths)   # 1-based
-            return maps[idx - 1]
+            idx = _nearest_index(nm, wavelengths)
+            return maps[idx]
 
         for comp in requested:
             wl = COMPOSITES[comp]
@@ -179,7 +185,6 @@ def main():
             gs.info(f"Generated custom composite raster: {outname}")
 
     finally:
-        # Always clean up every exploded band in one shot
         Module("g.remove", type="raster", pattern="_ihc*", flags="f", quiet=True)
 
 if __name__ == "__main__":
