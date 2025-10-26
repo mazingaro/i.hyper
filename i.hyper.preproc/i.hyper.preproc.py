@@ -77,7 +77,8 @@ from scipy.signal import savgol_filter
 import grass.script as gs
 import grass.script.array as garray
 
-# linear fill inside a spectrum for internal NaNs (used only with -q)
+from i_hyper_lib.sav_gol import _savgol_preserve_nan
+
 def _fill_nans_1d(x):
     v = np.asarray(x, dtype=np.float32)
     m = np.isfinite(v)
@@ -87,27 +88,7 @@ def _fill_nans_1d(x):
     f = interp1d(xi[m], v[m], kind="linear", fill_value="extrapolate", assume_sorted=True)
     return f(xi).astype(np.float32)
 
-# Savitzky–Golay on one spectrum, respecting NaNs as no-data
-def _savgol_preserve_nan(spec, win, poly, deriv, interp_nodata):
-    s = np.asarray(spec, dtype=np.float32)
-    nanmask = ~np.isfinite(s)
-
-    if interp_nodata:
-        s = _fill_nans_1d(s)
-        # any leading/trailing NaNs (pure no-data pixels) stay NaN:
-        s[nanmask] = np.nan
-
-    # run filter only on finite samples; keep NaNs as NaNs
-    out = np.full_like(s, np.nan, dtype=np.float32)
-    valid = np.isfinite(s)
-    if valid.sum() >= win:
-        out[valid] = savgol_filter(s[valid], win, poly, deriv=deriv, mode="interp").astype(np.float32)
-    else:
-        out[valid] = s[valid]
-    return out
-
 def _copy_r3_metadata(src, dst):
-    # copy history/title/description/vunit safely via a temp history file
     fd, tmp = tempfile.mkstemp(prefix="r3hist_", suffix=".txt")
     os.close(fd)
     with contextlib.suppress(FileNotFoundError):
@@ -124,7 +105,6 @@ def _copy_r3_metadata(src, dst):
         if vunit:
             gs.run_command("r3.support", map=dst, vunit=vunit, quiet=True)
 
-        # copy multi-line description block (Data Description) if present
         txt = gs.read_command("r3.info", map=src)
         lines, grab = [], False
         for line in txt.splitlines():
@@ -154,14 +134,12 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=2,
     gs.use_temp_region()
     gs.run_command("g.region", raster_3d=inp, quiet=True)
 
-    # Read as float32 and treat GRASS NULL as NaN directly
     arr_in = garray.array3d(mapname=inp, null="nan", dtype=np.float32)
     depth, rows, cols = arr_in.shape
 
-    # Exterior nodata mask (pixels that are NULL in ALL bands); keep them NULL
     exterior_mask = ~np.any(np.isfinite(arr_in), axis=0)
 
-    flat = arr_in.reshape(depth, -1).T  # (rows*cols, depth)
+    flat = arr_in.reshape(depth, -1).T
 
     if clamp_negative:
         flat = np.where(flat < 0, 0, flat).astype(np.float32)
@@ -173,12 +151,10 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=2,
 
     arr_out = flat_filt.T.reshape(depth, rows, cols)
 
-    # Reapply exterior NaNs (ensures transparent outside footprint)
     arr_out[:, exterior_mask] = np.nan
 
     out_arr = garray.array3d(dtype=np.float32)
     out_arr[...] = arr_out
-    # Write with null=nan so NaNs become GRASS NULL in the result
     out_arr.write(mapname=out, null="nan", overwrite=True)
 
     _copy_r3_metadata(inp, out)
