@@ -102,6 +102,15 @@
 # %end
 
 # %option
+# % key: dr_chunk_size
+# % type: integer
+# % description: Number of spectra per chunk for dimensionality reduction (0 = auto)
+# % required: no
+# % answer: 0
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
 # % key: dr_bands
 # % type: string
 # % description: Wavelength intervals or single values to include before dimensionality reduction (e.g., 400–700,850–1300,2200)
@@ -245,7 +254,8 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
                              continuum=False, dr_method=None,
                              dr_components=0, dr_kernel="rbf",
                              dr_gamma=0.01, dr_degree=3,
-                             dr_bands=None, dr_export=None):
+                             dr_bands=None, dr_export=None,
+                             dr_chunk_size=0):
 
     if (int(polyorder) == 0 and not baseline and not continuum
             and not clamp_negative and not interpolate_nodata
@@ -305,6 +315,21 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
         gs.message(f"Removing {nan_rows.sum()} invalid spectra before {dr_method}...")
         flat_filt = flat_filt[~nan_rows]
 
+    dr_info = None
+    if dr_method:
+        flat_filt, dr_info = _apply_dimensionality_reduction(
+            flat_filt,
+            method=dr_method,
+            n_components=dr_components,
+            kernel=dr_kernel,
+            gamma=dr_gamma,
+            degree=dr_degree,
+            bands=dr_bands,
+            export_path=dr_export,
+            chunk_size=dr_chunk_size if dr_chunk_size > 0 else None,
+            memory_limit_gb=8
+        )
+
     arr_out = flat_filt.T.reshape(-1, rows, cols)
     arr_out[:, exterior_mask] = np.nan
 
@@ -336,6 +361,7 @@ def main():
     dr_kernel = options["dr_kernel"]
     dr_gamma = float(options["dr_gamma"])
     dr_degree = int(options["dr_degree"])
+    dr_chunk_size = int(options["dr_chunk_size"])
     dr_bands = options["dr_bands"] or None
     dr_export = options["dr_export"] or None
 
@@ -355,7 +381,8 @@ def main():
         dr_gamma=dr_gamma,
         dr_degree=dr_degree,
         dr_bands=dr_bands,
-        dr_export=dr_export
+        dr_export=dr_export,
+        dr_chunk_size=dr_chunk_size
     )
 
 if __name__ == "__main__":
