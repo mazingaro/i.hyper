@@ -104,7 +104,7 @@
 # %option
 # % key: dr_chunk_size
 # % type: integer
-# % description: Number of spectra per chunk for dimensionality reduction (0 = auto)
+# % description: Number of spectra per chunk for dimensionality reduction (0 = all cube goes in memory)
 # % required: no
 # % answer: 0
 # % guisection: Dimensionality reduction
@@ -330,7 +330,7 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
 
     gs.use_temp_region()
     gs.run_command("g.region", raster_3d=inp, b=0, t=n_bands, quiet=True)
-    
+
     out_arr = garray.array3d(dtype=np.float32)
     out_arr[...] = arr_out
     out_arr.write(mapname=out, null="nan", overwrite=True)
