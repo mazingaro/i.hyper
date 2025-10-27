@@ -104,7 +104,7 @@
 # %option
 # % key: dr_chunk_size
 # % type: integer
-# % description: Number of spectra per chunk for dimensionality reduction (0 = all cube goes in memory)
+# % description: Number of spectra per chunk for dimensionality reduction (0 = all cube goes in memory; for KPCA difficult, so the result of chunking is an approximation of KPCA)
 # % required: no
 # % answer: 0
 # % guisection: Dimensionality reduction
