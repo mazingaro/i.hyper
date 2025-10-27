@@ -328,9 +328,14 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
     arr_out = flat_filt.T.reshape(n_bands, rows, cols)
     arr_out[:, exterior_mask] = np.nan
 
+    gs.use_temp_region()
+    gs.run_command("g.region", raster_3d=inp, b=0, t=n_bands, quiet=True)
+    
     out_arr = garray.array3d(dtype=np.float32)
     out_arr[...] = arr_out
     out_arr.write(mapname=out, null="nan", overwrite=True)
+
+    gs.del_temp_region()
 
     if dr_method:
         _set_dr_metadata(out, dr_method, dr_info or {})
