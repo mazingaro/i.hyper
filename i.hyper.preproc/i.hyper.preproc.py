@@ -55,28 +55,89 @@
 # % guisection: Savitzky-Golay
 # %end
 
+# %option
+# % key: dr_method
+# % type: string
+# % options: PCA,KPCA,Nystroem
+# % description: Select dimensionality reduction method
+# % required: no
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_components
+# % type: integer
+# % description: Number of components to retain
+# % required: no
+# % answer: 0
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_kernel
+# % type: string
+# % description: Kernel type (used only for KPCA or Nystroem)
+# % options: linear,rbf,poly,sigmoid
+# % required: no
+# % answer: rbf
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_gamma
+# % type: double
+# % description: Kernel gamma (KPCA/Nystroem only)
+# % required: no
+# % answer: 0.01
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_degree
+# % type: integer
+# % description: Polynomial degree (only used if kernel=poly)
+# % required: no
+# % answer: 3
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_bands
+# % type: string
+# % description: Wavelength intervals or single values to include before dimensionality reduction (e.g., 400–700,850–1300,2200)
+# % required: no
+# % guisection: Dimensionality reduction
+# %end
+
+# %option G_OPT_F_OUTPUT
+# % key: dr_export
+# % description: Optional output file to export fitted reduction model (.pkl, for reuse)
+# % required: no
+# % guisection: Dimensionality reduction
+# %end
+
 # %flag
 # % key: b
 # % description: Apply baseline correction
-# % guisection: Shape/background correction
+# % guisection: Additional corrections
 # %end
 
 # %flag
 # % key: c
-# % description: Apply continuum removal: if baseline correction checked it will go directly as input
-# % guisection: Shape/background correction
+# % description: Apply continuum removal
+# % guisection: Additional corrections
 # %end
 
 # %flag
 # % key: q
 # % description: Interpolate missing values in valid bands
-# % guisection: Null/Value handling
+# % guisection: Additional corrections
 # %end
 
 # %flag
 # % key: z
 # % description: Clamp negative values to zero
-# % guisection: Null/Value handling
+# % guisection: Additional corrections
 # %end
 
 import sys
@@ -89,10 +150,6 @@ import grass.script as gs
 import grass.script.array as garray
 from grass.script.utils import get_lib_path
 import importlib.util
-import warnings
-
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 def _import_from_i_hyper_lib(module_name):
     path = get_lib_path(modname="i_hyper_lib", libname=module_name)
@@ -111,10 +168,12 @@ def _import_from_i_hyper_lib(module_name):
 _savgol = _import_from_i_hyper_lib("sav_gol")
 _basecorr = _import_from_i_hyper_lib("base_corr")
 _contrem = _import_from_i_hyper_lib("continuum_rem")
+_dimred = _import_from_i_hyper_lib("dim_red")
 
 _savgol_preserve_nan = _savgol._savgol_preserve_nan
 _baseline_correction = _basecorr._baseline_correction
 _continuum_removal = _contrem._continuum_removal
+_apply_dimensionality_reduction = _dimred._apply_dimensionality_reduction
 
 
 def _fill_nans_1d(x):
@@ -162,19 +221,50 @@ def _copy_r3_metadata(src, dst):
         with contextlib.suppress(Exception):
             os.remove(tmp)
 
-    # Abort immediately if no processing options are requested
+
+def _set_dr_metadata(outmap, method, info):
+    lines = []
+    if method == "PCA" and "explained_variance_ratio" in info:
+        var = info["explained_variance_ratio"]
+        lines.append("Principal Component Analysis (PCA)")
+        for i, v in enumerate(var, 1):
+            lines.append(f"Component {i}: {v*100:.2f}% variance explained")
+    elif method == "KPCA":
+        lines.append(f"Kernel PCA (kernel={info.get('kernel')}, gamma={info.get('gamma')}, degree={info.get('degree')})")
+        lines.append(f"Components: {info.get('n_components')}")
+    elif method == "Nystroem":
+        lines.append(f"Nystroem approximation (kernel={info.get('kernel')}, gamma={info.get('gamma')}, degree={info.get('degree')})")
+        lines.append(f"Components: {info.get('n_components')}")
+    if lines:
+        gs.run_command("r3.support", map=outmap, description="\n".join(lines), quiet=True)
+
+
 def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
                              derivative_order=0, interpolate_nodata=False,
                              clamp_negative=False, baseline=False,
-                             continuum=False):
+                             continuum=False, dr_method=None,
+                             dr_components=0, dr_kernel="rbf",
+                             dr_gamma=0.01, dr_degree=3,
+                             dr_bands=None, dr_export=None):
 
-    # Explicitly abort when no operation is requested
     if (int(polyorder) == 0 and not baseline and not continuum
-            and not clamp_negative and not interpolate_nodata):
-        gs.fatal("No processing option selected. Use Savitzky–Golay, baseline, continuum, or value-handling flags.")
+            and not clamp_negative and not interpolate_nodata
+            and not dr_method):
+        gs.fatal("No processing option selected. Use preprocessing or dimensionality reduction parameters.")
 
     if int(window_length) % 2 == 0:
         gs.fatal("Window length must be an odd number")
+
+    steps = []
+    if polyorder > 0:
+        steps.append("Savitzky–Golay")
+    if baseline:
+        steps.append("Baseline correction")
+    if continuum:
+        steps.append("Continuum removal")
+    if dr_method:
+        steps.append(dr_method)
+    gs.message(" → ".join(steps) if steps else "No operations selected")
 
     gs.use_temp_region()
     gs.run_command("g.region", raster_3d=inp, quiet=True)
@@ -200,14 +290,26 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
     if continuum:
         flat_filt = np.apply_along_axis(_continuum_removal, 1, flat_filt).astype(np.float32)
 
-    arr_out = flat_filt.T.reshape(depth, rows, cols)
+    dr_info = None
+    if dr_method:
+        flat_filt, dr_info = _apply_dimensionality_reduction(
+            flat_filt, method=dr_method, n_components=dr_components,
+            kernel=dr_kernel, gamma=dr_gamma, degree=dr_degree,
+            bands=dr_bands, export_path=dr_export
+        )
+
+    arr_out = flat_filt.T.reshape(-1, rows, cols)
     arr_out[:, exterior_mask] = np.nan
 
     out_arr = garray.array3d(dtype=np.float32)
     out_arr[...] = arr_out
     out_arr.write(mapname=out, null="nan", overwrite=True)
 
-    _copy_r3_metadata(inp, out)
+    if dr_method:
+        _set_dr_metadata(out, dr_method, dr_info or {})
+    else:
+        _copy_r3_metadata(inp, out)
+
     gs.run_command("g.region", raster_3d=out, quiet=True)
 
 
@@ -222,6 +324,13 @@ def main():
     continuum = bool(flags.get("c"))
     interp = bool(flags.get("q"))
     clamp = bool(flags.get("z"))
+    dr_method = options["dr_method"] or None
+    dr_components = int(options["dr_components"])
+    dr_kernel = options["dr_kernel"]
+    dr_gamma = float(options["dr_gamma"])
+    dr_degree = int(options["dr_degree"])
+    dr_bands = options["dr_bands"] or None
+    dr_export = options["dr_export"] or None
 
     preprocess_hyperspectral(
         inp=options["input"],
@@ -233,7 +342,15 @@ def main():
         clamp_negative=clamp,
         baseline=baseline,
         continuum=continuum,
+        dr_method=dr_method,
+        dr_components=dr_components,
+        dr_kernel=dr_kernel,
+        dr_gamma=dr_gamma,
+        dr_degree=dr_degree,
+        dr_bands=dr_bands,
+        dr_export=dr_export
     )
 
 if __name__ == "__main__":
     sys.exit(main())
+
