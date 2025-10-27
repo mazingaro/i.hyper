@@ -274,9 +274,6 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
     exterior_mask = ~np.any(np.isfinite(arr_in), axis=0)
     flat = arr_in.reshape(depth, -1).T
 
-    if clamp_negative:
-        flat = np.where(flat < 0, 0, flat).astype(np.float32)
-
     flat_filt = flat
     if polyorder > 0:
         flat_filt = np.apply_along_axis(
@@ -290,13 +287,23 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
     if continuum:
         flat_filt = np.apply_along_axis(_continuum_removal, 1, flat_filt).astype(np.float32)
 
-    dr_info = None
-    if dr_method:
-        flat_filt, dr_info = _apply_dimensionality_reduction(
-            flat_filt, method=dr_method, n_components=dr_components,
-            kernel=dr_kernel, gamma=dr_gamma, degree=dr_degree,
-            bands=dr_bands, export_path=dr_export
-        )
+    # Interpolate missing values if requested (after all preprocessing)
+    if interpolate_nodata:
+        gs.message("Interpolating missing values across spectral bands...")
+        for i in range(flat_filt.shape[0]):
+            row = flat_filt[i, :]
+            if np.isnan(row).any():
+                flat_filt[i, :] = _fill_nans_1d(row)
+
+    # Clamp negative values
+    if clamp_negative:
+        flat_filt = np.where(flat_filt < 0, 0, flat_filt).astype(np.float32)
+
+    # Remove rows still containing NaNs (invalid spectra)
+    nan_rows = np.isnan(flat_filt).any(axis=1)
+    if nan_rows.any():
+        gs.message(f"Removing {nan_rows.sum()} invalid spectra before {dr_method}...")
+        flat_filt = flat_filt[~nan_rows]
 
     arr_out = flat_filt.T.reshape(-1, rows, cols)
     arr_out[:, exterior_mask] = np.nan
