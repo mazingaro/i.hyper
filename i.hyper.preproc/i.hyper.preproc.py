@@ -309,12 +309,6 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
     if clamp_negative:
         flat_filt = np.where(flat_filt < 0, 0, flat_filt).astype(np.float32)
 
-    # Remove rows still containing NaNs (invalid spectra)
-    nan_rows = np.isnan(flat_filt).any(axis=1)
-    if nan_rows.any():
-        gs.message(f"Removing {nan_rows.sum()} invalid spectra before {dr_method}...")
-        flat_filt = flat_filt[~nan_rows]
-
     dr_info = None
     if dr_method:
         flat_filt, dr_info = _apply_dimensionality_reduction(
@@ -330,7 +324,8 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
             memory_limit_gb=8
         )
 
-    arr_out = flat_filt.T.reshape(-1, rows, cols)
+    n_bands = flat_filt.shape[1]
+    arr_out = flat_filt.T.reshape(n_bands, rows, cols)
     arr_out[:, exterior_mask] = np.nan
 
     out_arr = garray.array3d(dtype=np.float32)
