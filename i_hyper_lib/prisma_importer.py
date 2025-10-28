@@ -344,4 +344,11 @@ def concatenate_hyperspectral(product: PrismaL2DProduct
     refl = np.concatenate([vnir_ref_f, swir_ref_f], axis=2).astype(np.float32)
     wavelengths = np.concatenate([v_wl, s_wl], axis=0)
     fwhm = np.concatenate([v_fwhm, s_fwhm], axis=0)
+
+    # ---- ensure ascending wavelength order for both metadata and cube ----
+    order = np.argsort(wavelengths.astype(np.float32))
+    wavelengths = wavelengths[order]
+    fwhm = fwhm[order]
+    refl = refl[:, :, order]
+
     return refl, wavelengths, fwhm
