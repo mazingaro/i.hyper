@@ -110,10 +110,14 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
     # Build list of composites to make (default RGB)
     wanted = []
     if composites:
+        comp_lookup = {k.upper(): (k, v) for k, v in COMPOSITES.items()}
         for comp in composites:
             compu = comp.strip().upper()
-            if compu in COMPOSITES:
-                wanted.append((compu, COMPOSITES[compu]))
+            if compu in comp_lookup:
+                orig_name, vals = comp_lookup[compu]
+                wanted.append((orig_name, vals))
+            else:
+                gs.warning(f"Unknown composite '{comp}' ignored.")
     else:
         wanted.append(("RGB", COMPOSITES["RGB"]))
 
