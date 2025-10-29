@@ -395,10 +395,14 @@ def preprocess_hyperspectral(
 
     gs.del_temp_region()
 
+    # --- Metadata handling and command recording ---
+    _copy_r3_metadata(inp, out)
     if dr_method:
         _set_dr_metadata(out, dr_method, dr_info or {})
-    else:
-        _copy_r3_metadata(inp, out)
+
+    # Write exact command used to Comments
+    cmd_line = "i.hyper.preproc " + " ".join(sys.argv[1:])
+    gs.run_command("r3.support", map=out, history=cmd_line, quiet=True)
 
     gs.run_command("g.region", raster_3d=out, quiet=True)
 
@@ -452,6 +456,7 @@ def main():
         dr_l1_ratio=dr_l1_ratio,
         dr_random_state=dr_random_state
     )
+
 
 if __name__ == "__main__":
     sys.exit(main())
