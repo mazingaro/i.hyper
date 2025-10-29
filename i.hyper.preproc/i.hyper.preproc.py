@@ -174,16 +174,18 @@ def _import_from_i_hyper_lib(module_name):
     return module
 
 
-_savgol = _import_from_i_hyper_lib("sav_gol")
-_basecorr = _import_from_i_hyper_lib("base_corr")
-_contrem = _import_from_i_hyper_lib("continuum_rem")
-_dimred = _import_from_i_hyper_lib("dim_red")
-
-_savgol_preserve_nan = _savgol._savgol_preserve_nan
-_baseline_correction = _basecorr._baseline_correction
-_continuum_removal = _contrem._continuum_removal
-_apply_dimensionality_reduction = _dimred._apply_dimensionality_reduction
-
+def _load_processing_libs():
+    """Import i_hyper_lib modules at runtime (avoids g.extension build-time failure)."""
+    savgol = _import_from_i_hyper_lib("sav_gol")
+    basecorr = _import_from_i_hyper_lib("base_corr")
+    contrem = _import_from_i_hyper_lib("continuum_rem")
+    dimred = _import_from_i_hyper_lib("dim_red")
+    return (
+        savgol._savgol_preserve_nan,
+        basecorr._baseline_correction,
+        contrem._continuum_removal,
+        dimred._apply_dimensionality_reduction,
+    )
 
 def _fill_nans_1d(x):
     v = np.asarray(x, dtype=np.float32)
@@ -256,7 +258,8 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
                              dr_gamma=0.01, dr_degree=3,
                              dr_bands=None, dr_export=None,
                              dr_chunk_size=0):
-
+                             
+    _savgol_preserve_nan, _baseline_correction, _continuum_removal, _apply_dimensionality_reduction = _load_processing_libs()
     if (int(polyorder) == 0 and not baseline and not continuum
             and not clamp_negative and not interpolate_nodata
             and not dr_method):
