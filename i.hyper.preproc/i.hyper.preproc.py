@@ -58,8 +58,8 @@
 # %option
 # % key: dr_method
 # % type: string
-# % options: PCA,KPCA,Nystroem
-# % description: Select dimensionality reduction method
+# % options: PCA,KPCA,Nystroem,FastICA,TruncatedSVD,NMF,SparsePCA
+# % description: Dimensionality reduction method (linear or nonlinear)
 # % required: no
 # % guisection: Dimensionality reduction
 # %end
@@ -67,7 +67,7 @@
 # %option
 # % key: dr_components
 # % type: integer
-# % description: Number of components to retain
+# % description: Number of components to retain (PCA,KPCA,Nystroem,FastICA,TruncatedSVD,NMF,SparsePCA). 0 = automatic (up to 10 or number of bands)
 # % required: no
 # % answer: 0
 # % guisection: Dimensionality reduction
@@ -76,8 +76,8 @@
 # %option
 # % key: dr_kernel
 # % type: string
-# % description: Kernel type (used only for KPCA or Nystroem)
 # % options: linear,rbf,poly,sigmoid
+# % description: Kernel type (used only for KPCA and Nystroem)
 # % required: no
 # % answer: rbf
 # % guisection: Dimensionality reduction
@@ -86,7 +86,7 @@
 # %option
 # % key: dr_gamma
 # % type: double
-# % description: Kernel gamma (KPCA/Nystroem only)
+# % description: Kernel gamma (KPCA and Nystroem only)
 # % required: no
 # % answer: 0.01
 # % guisection: Dimensionality reduction
@@ -95,16 +95,61 @@
 # %option
 # % key: dr_degree
 # % type: integer
-# % description: Polynomial degree (only used if kernel=poly)
+# % description: Polynomial degree (used if kernel=poly)
 # % required: no
 # % answer: 3
 # % guisection: Dimensionality reduction
 # %end
 
 # %option
+# % key: dr_max_iter
+# % type: integer
+# % description: Maximum iterations for convergence (FastICA,NMF,SparsePCA)
+# % required: no
+# % answer: 200
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_tol
+# % type: double
+# % description: Convergence tolerance (FastICA,NMF,SparsePCA)
+# % required: no
+# % answer: 1e-4
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_alpha
+# % type: double
+# % description: Regularization strength (NMF,SparsePCA)
+# % required: no
+# % answer: 0.0
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_l1_ratio
+# % type: double
+# % description: L1 ratio in [0,1] (NMF,SparsePCA)
+# % required: no
+# % answer: 0.0
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
+# % key: dr_random_state
+# % type: integer
+# % description: Random seed for reproducibility (PCA,FastICA,NMF,SparsePCA,TruncatedSVD)
+# % required: no
+# % answer: 0
+# % guisection: Dimensionality reduction
+# %end
+
+# %option
 # % key: dr_chunk_size
 # % type: integer
-# % description: Number of spectra per chunk for dimensionality reduction (0 = all cube goes in memory; for KPCA difficult, so the result of chunking is an approximation of KPCA)
+# % description: Number of spectra per chunk for dimensionality reduction (0 = automatic; KPCA is approximated if chunked)
 # % required: no
 # % answer: 0
 # % guisection: Dimensionality reduction
@@ -113,14 +158,14 @@
 # %option
 # % key: dr_bands
 # % type: string
-# % description: Wavelength intervals or single values to include before dimensionality reduction (e.g., 400–700,850–1300,2200)
+# % description: Wavelength intervals or single values to include before reduction (e.g., 400–700,850–1300,2200)
 # % required: no
 # % guisection: Dimensionality reduction
 # %end
 
 # %option G_OPT_F_OUTPUT
 # % key: dr_export
-# % description: Optional output file to export fitted reduction model (.pkl, for reuse)
+# % description: Optional path to export fitted reduction model (.pkl) for reuse
 # % required: no
 # % guisection: Dimensionality reduction
 # %end
@@ -159,6 +204,8 @@ import grass.script as gs
 import grass.script.array as garray
 from grass.script.utils import get_lib_path
 import importlib.util
+import re
+
 
 def _import_from_i_hyper_lib(module_name):
     path = get_lib_path(modname="i_hyper_lib", libname=module_name)
@@ -175,7 +222,6 @@ def _import_from_i_hyper_lib(module_name):
 
 
 def _load_processing_libs():
-    """Import i_hyper_lib modules at runtime (avoids g.extension build-time failure)."""
     savgol = _import_from_i_hyper_lib("sav_gol")
     basecorr = _import_from_i_hyper_lib("base_corr")
     contrem = _import_from_i_hyper_lib("continuum_rem")
@@ -187,6 +233,7 @@ def _load_processing_libs():
         dimred._apply_dimensionality_reduction,
     )
 
+
 def _fill_nans_1d(x):
     v = np.asarray(x, dtype=np.float32)
     m = np.isfinite(v)
@@ -195,6 +242,22 @@ def _fill_nans_1d(x):
     xi = np.arange(v.size, dtype=np.float32)
     f = interp1d(xi[m], v[m], kind="linear", fill_value="extrapolate", assume_sorted=True)
     return f(xi).astype(np.float32)
+
+
+def _get_wavelengths_from_r3info(mapname):
+    """Read wavelengths from r3.info metadata if present."""
+    try:
+        meta = gs.read_command("r3.info", map=mapname)
+    except Exception:
+        return None
+    wl = []
+    for line in meta.splitlines():
+        if "wavelength" in line.lower():
+            vals = re.findall(r"[\d.]+", line)
+            if vals:
+                wl = [float(v) for v in vals]
+                break
+    return wl if wl else None
 
 
 def _copy_r3_metadata(src, dst):
@@ -212,22 +275,6 @@ def _copy_r3_metadata(src, dst):
             gs.run_command("r3.support", map=dst, title=title, quiet=True)
         if vunit:
             gs.run_command("r3.support", map=dst, vunit=vunit, quiet=True)
-        txt = gs.read_command("r3.info", map=src)
-        lines, grab = [], False
-        for line in txt.splitlines():
-            s = line.rstrip()
-            if s.strip().startswith("|   Data Description:"):
-                grab = True
-                continue
-            if grab:
-                if s.strip().startswith("|   Comments:"):
-                    break
-                if s.startswith("|"):
-                    content = s[1:].strip()
-                    if content:
-                        lines.append(content)
-        if lines:
-            gs.run_command("r3.support", map=dst, description="\n".join(lines), quiet=True)
     finally:
         with contextlib.suppress(Exception):
             os.remove(tmp)
@@ -250,16 +297,16 @@ def _set_dr_metadata(outmap, method, info):
         gs.run_command("r3.support", map=outmap, description="\n".join(lines), quiet=True)
 
 
-def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
-                             derivative_order=0, interpolate_nodata=False,
-                             clamp_negative=False, baseline=False,
-                             continuum=False, dr_method=None,
-                             dr_components=0, dr_kernel="rbf",
-                             dr_gamma=0.01, dr_degree=3,
-                             dr_bands=None, dr_export=None,
-                             dr_chunk_size=0):
-                             
+def preprocess_hyperspectral(
+    inp, out, window_length=11, polyorder=0, derivative_order=0,
+    interpolate_nodata=False, clamp_negative=False, baseline=False,
+    continuum=False, dr_method=None, dr_components=0, dr_kernel="rbf",
+    dr_gamma=0.01, dr_degree=3, dr_bands=None, dr_export=None,
+    dr_chunk_size=0, dr_max_iter=200, dr_tol=1e-4, dr_alpha=0.0,
+    dr_l1_ratio=0.0, dr_random_state=0):
+
     _savgol_preserve_nan, _baseline_correction, _continuum_removal, _apply_dimensionality_reduction = _load_processing_libs()
+
     if (int(polyorder) == 0 and not baseline and not continuum
             and not clamp_negative and not interpolate_nodata
             and not dr_method):
@@ -300,7 +347,6 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
     if continuum:
         flat_filt = np.apply_along_axis(_continuum_removal, 1, flat_filt).astype(np.float32)
 
-    # Interpolate missing values if requested (after all preprocessing)
     if interpolate_nodata:
         gs.message("Interpolating missing values across spectral bands...")
         for i in range(flat_filt.shape[0]):
@@ -308,9 +354,12 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
             if np.isnan(row).any():
                 flat_filt[i, :] = _fill_nans_1d(row)
 
-    # Clamp negative values
     if clamp_negative:
         flat_filt = np.where(flat_filt < 0, 0, flat_filt).astype(np.float32)
+
+    wavelengths = _get_wavelengths_from_r3info(inp)
+    if dr_bands and wavelengths is None:
+        gs.message("No wavelength metadata found; ignoring dr_bands filter.")
 
     dr_info = None
     if dr_method:
@@ -322,9 +371,15 @@ def preprocess_hyperspectral(inp, out, window_length=11, polyorder=0,
             gamma=dr_gamma,
             degree=dr_degree,
             bands=dr_bands,
+            wavelengths=wavelengths,
             export_path=dr_export,
             chunk_size=dr_chunk_size if dr_chunk_size > 0 else None,
-            memory_limit_gb=8
+            memory_limit_gb=8,
+            max_iter=dr_max_iter,
+            tol=dr_tol,
+            alpha=dr_alpha,
+            l1_ratio=dr_l1_ratio,
+            random_state=dr_random_state
         )
 
     n_bands = flat_filt.shape[1]
@@ -367,6 +422,11 @@ def main():
     dr_chunk_size = int(options["dr_chunk_size"])
     dr_bands = options["dr_bands"] or None
     dr_export = options["dr_export"] or None
+    dr_max_iter = int(options["dr_max_iter"])
+    dr_tol = float(options["dr_tol"])
+    dr_alpha = float(options["dr_alpha"])
+    dr_l1_ratio = float(options["dr_l1_ratio"])
+    dr_random_state = int(options["dr_random_state"])
 
     preprocess_hyperspectral(
         inp=options["input"],
@@ -385,9 +445,13 @@ def main():
         dr_degree=dr_degree,
         dr_bands=dr_bands,
         dr_export=dr_export,
-        dr_chunk_size=dr_chunk_size
+        dr_chunk_size=dr_chunk_size,
+        dr_max_iter=dr_max_iter,
+        dr_tol=dr_tol,
+        dr_alpha=dr_alpha,
+        dr_l1_ratio=dr_l1_ratio,
+        dr_random_state=dr_random_state
     )
 
 if __name__ == "__main__":
     sys.exit(main())
-
