@@ -11,7 +11,7 @@ import grass.script as gs
 import grass.script.array as garray
 from grass.pygrass.modules import Module
 
-from tanager_importer import load_tanager_basic
+from tanager_reader import load_tanager_basic
 
 COMPOSITES = {
     "RGB":              [660.0, 572.0, 478.0],

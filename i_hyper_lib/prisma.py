@@ -11,7 +11,7 @@ import grass.script as gs
 import grass.script.array as garray
 from grass.pygrass.modules import Module
 
-from prisma_importer import load_prisma_l2d, concatenate_hyperspectral
+from prisma_reader import load_prisma_l2d, concatenate_hyperspectral
 
 COMPOSITES = {
     "RGB":              [660.0, 572.0, 478.0],
