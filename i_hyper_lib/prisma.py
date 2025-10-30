@@ -75,7 +75,7 @@ def _force_region_exact_for_transposed(geo, rows_E, cols_N):
 def _write_float_raster(name, data_2d_float32):
     arr = garray.array(dtype=np.float32)
     arr[:, :] = data_2d_float32
-    arr.write(name, overwrite=True)
+    arr.write(name, null="nan", overwrite=True)
 
 # -------------------------- public core --------------------------
 def import_prisma(input_path, output_name, composites=None, custom_wavelengths=None, strength_val=96, import_null=False):
@@ -99,6 +99,25 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
     refl, wavelengths, fwhm = concatenate_hyperspectral(prod)  # float32 0..1
     _require(refl.ndim == 3, f"Unexpected reflectance shape: {refl.shape}")
 
+    # --- a mask where every band is zero
+    bg_mask = None  # (N,E)
+
+    # VNIR contribution (consider only kept bands)
+    if prod.vnir and prod.vnir.dn is not None and prod.vnir.bands is not None:
+        v_idx = prod.vnir.bands.kept_indices
+        v_bg = np.all(prod.vnir.dn[:, :, v_idx] == 0, axis=2)  # (N,E)
+        bg_mask = v_bg if bg_mask is None else (bg_mask & v_bg)
+
+    # SWIR contribution (consider only kept bands)
+    if prod.swir and prod.swir.dn is not None and prod.swir.bands is not None:
+        s_idx = prod.swir.bands.kept_indices
+        s_bg = np.all(prod.swir.dn[:, :, s_idx] == 0, axis=2)  # (N,E)
+        bg_mask = s_bg if bg_mask is None else (bg_mask & s_bg)
+
+    # Apply: set only outside-footprint pixels to NaN across all bands (real 0.0 reflectance stays)
+    if bg_mask is not None:
+        refl[bg_mask, :] = np.nan  # GRASS will store these as NULLs on write
+
     # Determine transposed shape (E,N) from any band
     first_band = refl[:, :, 0].T                # (E,N)
     rows_E, cols_N = first_band.shape
@@ -110,10 +129,14 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
     # Build list of composites to make (default RGB)
     wanted = []
     if composites:
+        comp_lookup = {k.upper(): (k, v) for k, v in COMPOSITES.items()}
         for comp in composites:
             compu = comp.strip().upper()
-            if compu in COMPOSITES:
-                wanted.append((compu, COMPOSITES[compu]))
+            if compu in comp_lookup:
+                orig_name, vals = comp_lookup[compu]
+                wanted.append((orig_name, vals))
+            else:
+                gs.warning(f"Unknown composite '{comp}' ignored.")
     else:
         wanted.append(("RGB", COMPOSITES["RGB"]))
 
@@ -194,7 +217,7 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
             cube[k, :, :] = refl[:, :, k].T.astype(np.float32)
 
         # write 3D raster under the final output name (compat with EnMAP)
-        cube.write(mapname=f"{output_name}", overwrite=True)
+        cube.write(mapname=f"{output_name}", null="nan", overwrite=True)  # NaNs -> NULLs
         gs.info(f"Created 3D raster cube with all bands: {output_name} ({bands_total} slices).")
 
         # -------- r3 metadata to match EnMAP's r3.support pattern --------
