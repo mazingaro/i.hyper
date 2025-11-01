@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-# Tanager → GRASS (3D + composites), PRISMA-style region handling
-# - Entry: run_import() → import_tanager(...)
-# - Writes float32 (SR or radiance) with NaNs outside footprint (NULL in GRASS)
-# - Temp 2D bands for composites; cleans up afterwards
-# - When orthorectify=True (default): forward bilinear splat + 8-neighbor fill (preserves nodata),
-#   sets region from Planet_Ortho_Framing, writes full 3D cube + PRISMA-style r3 metadata.
+"""
+Tanager BASIC → GRASS
+
+- Imports Tanager BASIC (radiance or surface_reflectance)
+- Projects and resamples to the target map grid defined by Planet_Ortho_Framing
+  using bilinear forward splatting with small-neighborhood nearest fill for purely
+  geometric gaps (optional; SciPy if available)
+- Writes a full 3D raster cube (bands in Z) and per-band composites
+- Preserves nodata (nodata_pixels==1) as NULLs in GRASS
+"""
 
 import os
 import uuid
@@ -15,8 +19,9 @@ from grass.pygrass.modules import Module
 
 from tanager_reader import (
     load_tanager_basic,
-    read_planet_ortho_grid,
-    orthorectify_band_to_planet_grid,
+    read_planet_map_grid,
+    build_splat_plan,
+    project_band_to_map_grid,
 )
 
 COMPOSITES = {
@@ -27,6 +32,7 @@ COMPOSITES = {
 }
 
 # -------------------------- helpers --------------------------
+
 def _require(cond, msg):
     if not cond:
         gs.fatal(msg)
@@ -52,176 +58,141 @@ def _write_float_raster(name, data_2d_float32):
     arr.write(name, null="nan", overwrite=True)  # NaNs -> NULLs
 
 # -------------------------- core --------------------------
-def import_tanager(input_path,
-                   output_name,
-                   composites=None,
-                   custom_wavelengths=None,
-                   strength_val=96,
-                   import_null=False,
-                   orthorectify=True):
+
+def import_tanager(
+    input_path: str,
+    output_name: str,
+    composites=None,
+    custom_wavelengths=None,
+    strength_val=96,
+    import_null=False,
+    fill_8_neighbor=True
+):
     """
-    If orthorectify=True (default):
-      - read Planet_Ortho_Framing, set temp region,
-      - orthorectify all bands to that grid (bilinear + local 8-neighbor fill),
-      - write full 3D cube + r3 metadata,
-      - produce composites from the same ortho bands.
-    If orthorectify=False:
-      - keep existing rectangular behaviour (no grid transform), also write 3D cube + metadata.
+    Import, project, and resample Tanager BASIC to the target map grid. Writes:
+      - 3D raster cube (bands as slices)
+      - per-band temporary rasters for composites
+      - color-enhanced composites
+
+    Parameters:
+      fill_8_neighbor: if True and SciPy is available, fills only geometric gaps
+                       via nearest neighbor limited to the 8-neighborhood.
     """
     h5 = _resolve_h5(input_path)
     prod = load_tanager_basic(h5)
 
-    data = prod.data              # (rows, cols, bands), float32 (NaNs where nodata_pixels==1)
+    data = prod.data              # (rows, cols, bands), float32 with NaNs where nodata_pixels==1
     wl   = prod.wavelengths_nm
     fwhm = prod.fwhm_nm
 
-    _require(data is not None and data.ndim == 3, "Tanager cube missing or invalid.")
-    rows, cols, bands_total = data.shape
+    _require(data is not None and data.ndim == 3, "Data cube missing or invalid.")
+    _require(prod.lat is not None and prod.lon is not None, "Latitude/Longitude grids missing.")
 
-    # Build list of composites (default RGB)
+    # composites list
     wanted = []
     if composites:
-        comp_lookup = {k.upper(): (k, v) for k, v in COMPOSITES.items()}
+        lut = {k.upper(): (k, v) for k, v in COMPOSITES.items()}
         for comp in composites:
-            compu = comp.strip().upper()
-            if compu in comp_lookup:
-                orig_name, vals = comp_lookup[compu]
-                wanted.append((orig_name, vals))
+            key = comp.strip().upper()
+            if key in lut:
+                name, vals = lut[key]
+                wanted.append((name, vals))
             else:
-                gs.warning(f"Unknown composite '{comp}' ignored.")
+                gs.warning(f"Ignored unknown composite '{comp}'.")
     else:
         wanted.append(("RGB", COMPOSITES["RGB"]))
 
     if custom_wavelengths:
         if len(custom_wavelengths) != 3:
-            gs.fatal("Custom composites must provide exactly 3 wavelengths (e.g., 850,1650,660)")
+            gs.fatal("Custom composites must provide exactly 3 wavelengths, e.g. 850,1650,660")
         wanted.append(("CUSTOM", [float(x) for x in custom_wavelengths]))
-
-    # Temp bands cache (1-based indices)
-    temp_bands = {}
-    created_names = []
 
     gs.use_temp_region()
 
-    if orthorectify:
-        _require(prod.lat is not None and prod.lon is not None, "Latitude/Longitude grids missing.")
-        grid = read_planet_ortho_grid(h5)
+    # Read Planet target map grid and set region
+    grid = read_planet_map_grid(h5)
+    Module("g.region",
+           w=grid.west, e=grid.east, s=grid.south, n=grid.north,
+           ewres=grid.ewres, nsres=grid.nsres, flags="a", quiet=True)
 
-        # Set computational region from Planet's ortho framing
-        Module("g.region",
-               w=grid.west, e=grid.east, s=grid.south, n=grid.north,
-               ewres=grid.ewres, nsres=grid.nsres, flags="a", quiet=True)
+    # Precompute the per-scene splat plan.
+    # Use a band-independent nodata mask (after loader has applied nodata across all bands).
+    base_mask = np.isnan(data[..., 0])
+    plan = build_splat_plan(prod.lon, prod.lat, grid, nodata_mask=base_mask)
 
-        # On-demand band writer (orthorectify each band)
-        def ensure_band_written(idx1):
-            if idx1 in temp_bands:
-                return temp_bands[idx1]
-            k = idx1 - 1
-            ortho2d = orthorectify_band_to_planet_grid(prod.lon, prod.lat, data[:, :, k], grid)
-            name = _temp_name(f"{output_name}_b{idx1:03d}")
-            _write_float_raster(name, ortho2d)
-            temp_bands[idx1] = name
-            created_names.append(name)
-            return name
+    # Band writer using projection + gridding and caching
+    temp_bands = {}
+    created_names = []
 
-        # Build ORTHO 3D cube (bands in Z)
+    def ensure_band_written(idx1):
+        if idx1 in temp_bands:
+            return temp_bands[idx1]
+        k = idx1 - 1
+        ortho2d = project_band_to_map_grid(
+            band2d=data[:, :, k],
+            plan=plan,
+            fill_8_neighbor=fill_8_neighbor
+        )
+        name = _temp_name(f"{output_name}_b{idx1:03d}")
+        _write_float_raster(name, ortho2d)
+        temp_bands[idx1] = name
+        created_names.append(name)
+        return name
+
+    # -------------------------- 3D cube write --------------------------
+    bands_total = int(data.shape[2])
+    try:
+        # Mirror 2D res into 3D; Z is band index
+        reg2d = gs.region()
+        nsres2d = float(reg2d["nsres"])
+        ewres2d = float(reg2d["ewres"])
+        Module("g.region", nsres3=nsres2d, ewres3=ewres2d, b=0, t=bands_total, tbres=1, quiet=True)
+
+        cube = garray.array3d(dtype=np.float32)
+        for k in range(bands_total):
+            ortho2d = project_band_to_map_grid(
+                band2d=data[:, :, k],
+                plan=plan,
+                fill_8_neighbor=fill_8_neighbor
+            )
+            cube[k, :, :] = ortho2d
+
+        cube.write(mapname=f"{output_name}", null="nan", overwrite=True)
+        gs.info(f"Created 3D raster cube with all bands: {output_name} ({bands_total} slices).")
+
+        # r3 metadata (wavelengths & FWHM)
         try:
-            # mirror 2D res to 3D
-            reg2d = gs.region()
-            nsres2d = float(reg2d["nsres"])
-            ewres2d = float(reg2d["ewres"])
+            desc = ["Hyperspectral Metadata:", f"Valid Bands: {bands_total}"]
+            for i in range(bands_total):
+                wl_i = float(wl[i])
+                fwhm_i = float(fwhm[i]) if i < len(fwhm) else float("nan")
+                desc.append(f"Band {i+1}: {wl_i} nm, FWHM: {fwhm_i} nm")
+            Module("r3.support",
+                   map=output_name,
+                   title="Tanager Hyperspectral Data (Projected to Map Grid)",
+                   description="\n".join(desc),
+                   vunit="nanometers",
+                   quiet=True)
+        except Exception as e_meta:
+            gs.warning(f"Failed to write r3 metadata: {e_meta}")
+    except Exception as e:
+        gs.warning(f"3D cube creation failed: {e}")
 
-            # Set 3D region (Z as band index 1..bands_total)
-            Module("g.region", nsres3=nsres2d, ewres3=ewres2d, b=0, t=bands_total, tbres=1, quiet=True)
+    # -------------------------- composites --------------------------
+    # Create band rasters on demand; reuse cached maps
+    # Prime RGB bands so region aligns to a real raster before color enhancement
+    rgb_target = COMPOSITES["RGB"]
+    rgb_indices_1b = [_find_nearest_band_1based(w, wl) for w in rgb_target]
+    for idx1 in rgb_indices_1b:
+        ensure_band_written(idx1)
+    ref_map = next(iter({i: temp_bands[i] for i in rgb_indices_1b}.values()))
+    Module("g.region", raster=ref_map, quiet=True)
 
-            cube = garray.array3d(dtype=np.float32)
-            for k in range(bands_total):
-                # orthorectify & write into the cube
-                ortho2d = orthorectify_band_to_planet_grid(prod.lon, prod.lat, data[:, :, k], grid)
-                cube[k, :, :] = ortho2d
-
-            cube.write(mapname=f"{output_name}", null="nan", overwrite=True)
-            gs.info(f"Created ORTHO 3D raster cube with all bands: {output_name} ({bands_total} slices).")
-
-            # r3 metadata (like PRISMA)
-            try:
-                desc_lines = ["Hyperspectral Metadata:", f"Valid Bands: {bands_total}"]
-                for i in range(bands_total):
-                    wl_i = float(wl[i])
-                    fwhm_i = float(fwhm[i]) if i < len(fwhm) else float("nan")
-                    desc_lines.append(f"Band {i+1}: {wl_i} nm, FWHM: {fwhm_i} nm")
-                Module("r3.support",
-                       map=output_name,
-                       title="Tanager Hyperspectral Data (Orthorectified)",
-                       description="\n".join(desc_lines),
-                       vunit="nanometers",
-                       quiet=True)
-            except Exception as e_meta:
-                gs.warning(f"Failed to write r3 metadata: {e_meta}")
-        except Exception as e:
-            gs.warning(f"3D cube creation (ortho) failed: {e}")
-
-        rgb_enhanced = {}  # region already fixed; we don't need to prewrite RGB here
-
-    else:
-        # ---- existing rectangular (image-space) path ----
-        # Determine transposed shape (E,N) from any band and set rows/cols
-        first_band = data[:, :, 0].T
-        rows_E, cols_N = first_band.shape
-        Module("g.region", rows=rows_E, cols=cols_N, quiet=True)
-
-        def ensure_band_written(idx1):
-            if idx1 in temp_bands:
-                return temp_bands[idx1]
-            k = idx1 - 1
-            band_EN = data[:, :, k].T.astype(np.float32)
-            name = _temp_name(f"{output_name}_b{idx1:03d}")
-            _write_float_raster(name, band_EN)
-            temp_bands[idx1] = name
-            created_names.append(name)
-            return name
-
-        # Prewrite RGB to peg region & cache
-        rgb_target = COMPOSITES["RGB"]
-        rgb_indices_1b = [_find_nearest_band_1based(w, wl) for w in rgb_target]
-        for idx1 in rgb_indices_1b:
-            ensure_band_written(idx1)
-        ref_map_for_region = next(iter({i: temp_bands[i] for i in rgb_indices_1b}.values()))
-        Module("g.region", raster=ref_map_for_region, quiet=True)
-        rgb_enhanced = {idx1: temp_bands[idx1] for idx1 in rgb_indices_1b}
-
-        # Build 3D cube from original (non-ortho) data for parity with PRISMA
-        try:
-            Module("g.region", b=0, t=bands_total, tbres=1, quiet=True)
-            cube = garray.array3d(dtype=np.float32)
-            for k in range(bands_total):
-                cube[k, :, :] = data[:, :, k].T
-            cube.write(mapname=f"{output_name}", null="nan", overwrite=True)
-            gs.info(f"Created 3D raster cube with all bands: {output_name} ({bands_total} slices).")
-
-            try:
-                desc_lines = ["Hyperspectral Metadata:", f"Valid Bands: {bands_total}"]
-                for i in range(bands_total):
-                    wl_i = float(wl[i])
-                    fwhm_i = float(fwhm[i]) if i < len(fwhm) else float("nan")
-                    desc_lines.append(f"Band {i+1}: {wl_i} nm, FWHM: {fwhm_i} nm")
-                Module("r3.support",
-                       map=output_name,
-                       title="Tanager Hyperspectral Data",
-                       description="\n".join(desc_lines),
-                       vunit="nanometers",
-                       quiet=True)
-            except Exception as e_meta:
-                gs.warning(f"Failed to write r3 metadata: {e_meta}")
-        except Exception as e:
-            gs.warning(f"3D cube creation failed: {e}")
-
-    # -------------------------- composites (same as PRISMA flow) --------------------------
     for name, targets in wanted:
         bands_1b = [_find_nearest_band_1based(w, wl) for w in targets]
         maps = []
         for idx1 in bands_1b:
-            maps.append(rgb_enhanced[idx1] if idx1 in rgb_enhanced else ensure_band_written(idx1))
+            maps.append(temp_bands[idx1] if idx1 in temp_bands else ensure_band_written(idx1))
 
         Module("g.region", raster=maps[0], quiet=True)
         if name.upper() == "RGB":
@@ -230,17 +201,21 @@ def import_tanager(input_path,
         else:
             Module("i.colors.enhance", red=maps[0], green=maps[1], blue=maps[2],
                    strength=str(strength_val), quiet=True)
+
         outname = f"{output_name}_{name.lower().replace('-', '_')}"
         Module("r.composite", red=maps[0], green=maps[1], blue=maps[2],
                output=outname, quiet=True, overwrite=True)
         gs.info(f"Generated composite raster: {outname}")
 
+    # cleanup
     if created_names:
         Module("g.remove", type="raster", name=",".join(created_names), flags="f", quiet=True)
 
     gs.del_temp_region()
 
+
 # -------------------------- entry --------------------------
+
 def run_import(options, flags):
     custom = None
     if options.get("composites_custom"):
@@ -249,7 +224,7 @@ def run_import(options, flags):
             if len(custom) != 3:
                 raise ValueError
         except Exception:
-            gs.fatal("Invalid format for composites_custom. Usage example: 850,1650,660")
+            gs.fatal("Invalid format for composites_custom. Example: 850,1650,660")
 
     strength_opt = options.get("strength")
     if strength_opt is None or str(strength_opt).strip() == "":
@@ -258,9 +233,9 @@ def run_import(options, flags):
         try:
             strength_val = int(str(strength_opt).strip())
         except Exception:
-            gs.fatal("Invalid strength. Provide an integer 0-100.")
+            gs.fatal("Invalid strength. Provide an integer 0–100.")
         if not (0 <= strength_val <= 100):
-            gs.fatal("Invalid strength. Provide an integer 0-100.")
+            gs.fatal("Invalid strength. Provide an integer 0–100.")
 
     comps = [c.strip() for c in options["composites"].split(",")] if options.get("composites") else None
     import_null = bool(flags.get("n"))
@@ -272,5 +247,5 @@ def run_import(options, flags):
         custom_wavelengths=custom,
         strength_val=strength_val,
         import_null=import_null,
-        orthorectify=True
+        fill_8_neighbor=True,
     )
