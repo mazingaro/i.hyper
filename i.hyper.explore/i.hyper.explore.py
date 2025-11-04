@@ -25,7 +25,13 @@
 # % key: coordinates
 # % description: Comma separated list of coordinates
 # % multiple: yes
-# % required: yes
+# % required: no
+# %end
+
+# %option G_OPT_V_INPUT
+# % key: points
+# % description: Point vector map with query locations
+# % required: no
 # %end
 
 # %flag
@@ -252,9 +258,51 @@ def _parse_coordinates(opt):
         gs.fatal("Coordinates list must contain an even number of values (E,N pairs)")
     return tokens
 
+def _read_points_from_vector(vmap):
+    """
+    Returns a list of (E, N) tuples from a point vector map.
+    Uses v.out.ascii format=point and takes the first two columns as E,N.
+    """
+    out = gs.read_command(
+        "v.out.ascii",
+        input=vmap,
+        format="point",
+        separator=",",
+        quiet=True,
+    )
+    coords = []
+    for line in out.strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) >= 2:
+            try:
+                e = float(parts[0])
+                n = float(parts[1])
+                coords.append((e, n))
+            except ValueError:
+                # skip malformed rows
+                pass
+    return coords
+
 def main(options, flags):
     maps = _parse_maps(options["map"])
-    tokens = _parse_coordinates(options["coordinates"])
+
+    # Collect query locations from coordinates= and/or points= (vector)
+    coords_pairs = []
+    if options.get("coordinates"):
+        tokens = _parse_coordinates(options["coordinates"])
+        for i in range(0, len(tokens), 2):
+            try:
+                e = float(tokens[i])
+                n = float(tokens[i + 1])
+            except ValueError:
+                gs.fatal(f"Non-numeric coordinate at position {i}: {tokens[i]}, {tokens[i+1]}")
+            coords_pairs.append((e, n))
+
+    if options.get("points"):
+        coords_pairs.extend(_read_points_from_vector(options["points"]))
+
+    if not coords_pairs:
+        gs.fatal("No query locations provided. Use coordinates= and/or points=<point vector map>.")
 
     gs.use_temp_region()
 
@@ -265,12 +313,7 @@ def main(options, flags):
         wavelengths, fwhm = _band_wavelengths(mapname, band_count)
 
         points = []
-        for i in range(0, len(tokens), 2):
-            try:
-                e = float(tokens[i])
-                n = float(tokens[i + 1])
-            except ValueError:
-                gs.fatal(f"Non-numeric coordinate at position {i}: {tokens[i]}, {tokens[i+1]}")
+        for (e, n) in coords_pairs:
             values = _sample_all_bands_at_point(mapname, e, n, band_count)
             points.append({"x": e, "y": n, "values": values})
 
