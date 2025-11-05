@@ -96,6 +96,35 @@ def _band_wavelengths(mapname, expected):
 
     return wavelengths, fwhm
 
+def _band_units(mapname):
+    """
+    Return the units string from the r3.info description/comments.
+    If not found or 'unitless/none', return None (caller will assume reflectance).
+    """
+    txt = gs.read_command("r3.info", map=mapname)
+    for raw in txt.splitlines():
+        line = raw.strip().strip("| ").rstrip("| ").strip()
+        if line.lower().startswith("units:"):
+            val = line.split(":", 1)[1].strip()
+            if val and val.lower() not in ("unitless", "none", "units", "1"):
+                return val
+            return None
+    return None
+
+def _has_components(mapname):
+    """
+    Detect whether the 3D raster contains PCA components (affects axis labeling).
+    Looks for 'Component N:' lines in r3.info comments.
+    Returns the number of components found, or 0 if none.
+    """
+    txt = gs.read_command("r3.info", map=mapname)
+    components_count = 0
+    for raw in txt.splitlines():
+        line = raw.strip().strip("| ").rstrip("| ").strip()
+        if re.search(r"^Component\s+\d+\s*:", line):
+            components_count += 1
+    return components_count  # Returns the number of components found
+
 def _sample_all_bands_at_point(mapname, e, n, band_count, sep="|", null_marker="*"):
     """
     Calls r3.what once (2D coords) and returns list of band_count values (float or None).
@@ -144,8 +173,11 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
     datasets: list of dicts:
       {
         "map": <name>,
-        "wavelength_nm": [...],
-        "points": [ {"x": E, "y": N, "values": [...]}, ... ]
+        "wavelength_nm": [...],     # may contain None when not available
+        "points": [ {"x": E, "y": N, "values": [...]}, ... ],
+        "units": <str or None>,     # parsed from metadata
+        "components": <int>,        # Number of PCA components present (if any)
+        "band_count": <int>,
       }
     Styling:
       - Linestyle varies by MAP
@@ -160,6 +192,23 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
 
     linestyles = ["-", "--", "-.", ":", (0, (5, 1)), (0, (3, 1, 1, 1)), (0, (1, 1))]
     fig, ax = plt.subplots()
+
+    # If any dataset indicates components, X label is "Components" and Y label must be plain "Value"
+    components_mode = any(ds.get("components", 0) > 0 for ds in datasets)
+    if components_mode:
+        xlabel = "Components"
+        ylabel = "Value"  # <- per requirement: no units if components present
+    else:
+        # otherwise use wavelength X label and units logic for Y label
+        # Y label: prefer common units if provided; else assume reflectance
+        ds_units = [ds.get("units") for ds in datasets if ds.get("units")]
+        if ds_units and all(u == ds_units[0] for u in ds_units):
+            ylabel = ds_units[0]
+        else:
+            ylabel = "Reflectance (unitless)"
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
 
     # How many points total (use max across datasets)
     num_points = max((len(ds["points"]) for ds in datasets), default=0)
@@ -176,29 +225,36 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
         for mi, ds in enumerate(datasets):
             if pi >= len(ds["points"]):
                 continue
-            wl = np.asarray([np.nan if w is None else float(w)
-                             for w in ds["wavelength_nm"]], dtype=float)
-            p = ds["points"][pi]
-            vals = np.asarray([np.nan if v is None else float(v)
-                               for v in p["values"]], dtype=float)
-            mask = np.isfinite(wl) & np.isfinite(vals)
+
+            # Check if this dataset has components and adjust X (wavelengths or component indices)
+            if ds.get("components", 0) > 0:
+                # PCA components mode: Use component indices as X axis (just an index)
+                wl = np.arange(1, ds["components"] + 1, dtype=float)
+                vals = np.asarray([np.nan if v is None else float(v)
+                                   for v in ds["points"][pi]["values"]], dtype=float)
+                mask = np.isfinite(vals)
+            else:
+                # Regular mode: Use wavelengths as X axis
+                wl = np.asarray([np.nan if w is None else float(w)
+                                 for w in ds["wavelength_nm"]], dtype=float)
+                vals = np.asarray([np.nan if v is None else float(v)
+                                   for v in ds["points"][pi]["values"]], dtype=float)
+                mask = np.isfinite(wl) & np.isfinite(vals)
+
             if not np.any(mask):
                 continue
 
-            #sort by wavelength to avoid wrap-around connection
             wl = wl[mask]
             vals = vals[mask]
+
+            # Sort by X to avoid wrap-around connection
             order = np.argsort(wl)
             wl = wl[order]
             vals = vals[order]
 
             ls = linestyles[mi % len(linestyles)]
-            ax.plot(wl[mask], vals[mask], linestyle=ls, color=color, linewidth=1.6)
+            ax.plot(wl, vals, linestyle=ls, linewidth=1.6, color=color)
 
-    if title:
-        ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
     ax.grid(True, alpha=0.3)
 
     # Legends: maps (linestyles) and points (colors)
@@ -225,6 +281,7 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
         ax.legend(handles=point_handles, title="Point (color)",
                   loc="lower right", fontsize="small", framealpha=0.9)
 
+    # Output size
     if size and output:
         try:
             w_px, h_px = [int(s) for s in size.split(",")]
@@ -279,7 +336,6 @@ def _read_points_from_vector(vmap):
                 n = float(parts[1])
                 coords.append((e, n))
             except ValueError:
-                # skip malformed rows
                 pass
     return coords
 
@@ -317,7 +373,17 @@ def main(options, flags):
             values = _sample_all_bands_at_point(mapname, e, n, band_count)
             points.append({"x": e, "y": n, "values": values})
 
-        datasets.append({"map": mapname, "wavelength_nm": wavelengths, "points": points})
+        units = _band_units(mapname)         # may be None → assumed reflectance later (if not components)
+        has_comp = _has_components(mapname)  # PCA → axis switch
+
+        datasets.append({
+            "map": mapname,
+            "wavelength_nm": wavelengths,
+            "points": points,
+            "units": units,
+            "components": has_comp,
+            "band_count": band_count,
+        })
 
     # If -p (print) is given, emit JSON instead of plotting
     if flags.get("p"):

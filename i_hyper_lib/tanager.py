@@ -160,9 +160,13 @@ def import_tanager(
         cube.write(mapname=f"{output_name}", null="nan", overwrite=True)
         gs.info(f"Created 3D raster cube with all bands: {output_name} ({bands_total} slices).")
 
-        # r3 metadata (wavelengths & FWHM)
+        # r3 metadata (wavelengths & FWHM + Units)
         try:
             desc = ["Hyperspectral Metadata:", f"Valid Bands: {bands_total}"]
+            # write units from the HDF5 dataset (or sensible fallback already resolved in reader)
+            if getattr(prod, "data_units", None):
+                desc.append(f"Units: {prod.data_units}")
+
             for i in range(bands_total):
                 wl_i = float(wl[i])
                 fwhm_i = float(fwhm[i]) if i < len(fwhm) else float("nan")

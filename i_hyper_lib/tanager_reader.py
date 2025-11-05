@@ -8,6 +8,7 @@ Tanager BASIC reader and map projection + gridding helpers
   * applies nodata mask where /HDFEOS/SWATHS/HYP/Data Fields/nodata_pixels == 1
   * extracts wavelengths and FWHM from dataset attributes; ensures ascending wavelength order
   * exposes per-pixel Latitude/Longitude arrays
+  * exposes selected data field name and its units (read from HDF5 if present)
 
 - Provides projection + gridding helpers:
   * parses Planet_Ortho_Framing (UTM grid, geotransform, rows/cols)
@@ -61,6 +62,8 @@ class TanagerProduct:
     lat: Optional[np.ndarray]     # (rows, cols)
     lon: Optional[np.ndarray]     # (rows, cols)
     attrs: Dict[str, Any]         # top-level file attributes (optional use)
+    data_field: str               # 'surface_reflectance' or 'toa_radiance'
+    data_units: str               # human-readable units string
 
 
 @dataclass(frozen=True)
@@ -107,6 +110,23 @@ class SplatPlan:
 def _maybe(f: h5py.File, path: str):
     return f[path][()] if path in f else None
 
+def _units_from_attrs(attrs: h5py.AttributeManager, fallback: Optional[str]) -> Optional[str]:
+    """
+    Try to read units from common attribute keys (case-insensitive).
+    Returns string if found (as-is), else fallback.
+    """
+    for key in ("Unit", "Units", "unit", "units"):
+        if key in attrs:
+            try:
+                val = attrs[key]
+                if val is None:
+                    continue
+                s = str(val).strip()
+                if s != "":
+                    return s
+            except Exception:
+                pass
+    return fallback
 
 def load_tanager_basic(product_path: str) -> TanagerProduct:
     with h5py.File(product_path, "r") as f:
@@ -122,10 +142,12 @@ def load_tanager_basic(product_path: str) -> TanagerProduct:
 
         # choose data field
         dset = None
+        chosen_name = None
         for name in DS_ORDER:
             p = f"{DF}/{name}"
             if p in f:
                 dset = f[p]
+                chosen_name = name
                 break
         if dset is None:
             raise ValueError("No 'surface_reflectance' or 'toa_radiance' dataset found.")
@@ -160,6 +182,15 @@ def load_tanager_basic(product_path: str) -> TanagerProduct:
             if m.any():
                 data[m, :] = np.nan
 
+        # derive human-friendly units
+        # 1) prefer dataset attribute if present (e.g., ":Unit = 'W/(m^2 sr um)'")
+        # 2) fallback to a reasonable default from the chosen dataset
+        fallback_units = "unitless (reflectance)" if chosen_name == "surface_reflectance" else "W/(m^2 sr um)"
+        data_units = _units_from_attrs(dset.attrs, fallback_units)
+        # normalize a couple of common textual variants
+        if data_units.lower() in ("unitless", "none", "1", "ratio"):
+            data_units = "unitless (reflectance)"
+
     return TanagerProduct(
         path=product_path,
         data=data,
@@ -168,6 +199,8 @@ def load_tanager_basic(product_path: str) -> TanagerProduct:
         lat=lat,
         lon=lon,
         attrs=attrs,
+        data_field=chosen_name,
+        data_units=str(data_units),
     )
 
 
