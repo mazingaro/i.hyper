@@ -7,8 +7,8 @@ from statistics import mean
 COMPOSITES = {
     "RGB": [660, 572, 478],
     "CIR": [848, 660, 572],
-    "SWIR-agriculture": [848, 1653, 660],
-    "SWIR-geology": [2200, 848, 572]
+    "SWIR_agriculture": [848, 1653, 660],
+    "SWIR_geology": [2200, 848, 572]
 }
 
 @contextlib.contextmanager

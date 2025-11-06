@@ -33,7 +33,7 @@
 # % key: composites
 # % type: string
 # % multiple: yes
-# % options: RGB,CIR,SWIR-agriculture,SWIR-geology
+# % options: RGB,CIR,SWIR_agriculture,SWIR_geology
 # % description: Which composites to generate
 # % guisection: Composites
 # %end
@@ -62,8 +62,8 @@ from grass.pygrass.modules import Module
 COMPOSITES = {
     "RGB": [660, 572, 478],
     "CIR": [848, 660, 572],
-    "SWIR-agriculture": [848, 1653, 660],
-    "SWIR-geology": [2200, 848, 572],
+    "SWIR_agriculture": [848, 1653, 660],
+    "SWIR_geology": [2200, 848, 572],
 }
 
 def _band_count(mapname):

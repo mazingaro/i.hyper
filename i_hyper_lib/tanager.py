@@ -27,8 +27,8 @@ from tanager_reader import (
 COMPOSITES = {
     "RGB":              [660.0, 572.0, 478.0],
     "CIR":              [848.0, 660.0, 572.0],
-    "SWIR-agriculture": [848.0, 1653.0, 660.0],
-    "SWIR-geology":     [2200.0, 848.0, 572.0],
+    "SWIR_agriculture": [848.0, 1653.0, 660.0],
+    "SWIR_geology":     [2200.0, 848.0, 572.0],
 }
 
 # -------------------------- helpers --------------------------
