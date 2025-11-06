@@ -39,7 +39,7 @@
 # % type: string
 # % required: no
 # % multiple: yes
-# % options: rgb,cir,swir-agriculture,swir-geology
+# % options: RGB,CIR,SWIR-agriculture,SWIR-geology
 # % description: Composites to generate during import
 # % guisection: Optional
 # %end
