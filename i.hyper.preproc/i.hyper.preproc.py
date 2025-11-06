@@ -58,7 +58,7 @@
 # %option
 # % key: dr_method
 # % type: string
-# % options: PCA,KPCA,Nystroem,FastICA,TruncatedSVD,NMF,SparsePCA
+# % options: pca,kpca,nystroem,fastica,truncatedsvd,nmf,sparsepca
 # % description: Dimensionality reduction method (linear or nonlinear)
 # % required: no
 # % guisection: Dimensionality reduction
@@ -281,16 +281,23 @@ def _copy_r3_metadata(src, dst):
 
 def _set_dr_metadata(outmap, method, info):
     lines = []
-    if method == "PCA" and "explained_variance_ratio" in info:
+    name_map = {
+        "pca": "PCA",
+        "kpca": "Kernel PCA",
+        "nystroem": "Nystroem",
+        "fastica": "FastICA",
+        "truncatedsvd": "TruncatedSVD",
+        "nmf": "NMF",
+        "sparsepca": "SparsePCA"
+    }
+    mdisp = name_map.get(method, method.upper())
+    if method == "pca" and "explained_variance_ratio" in info:
         var = info["explained_variance_ratio"]
-        lines.append("Principal Component Analysis (PCA)")
+        lines.append(f"Principal Component Analysis ({mdisp})")
         for i, v in enumerate(var, 1):
             lines.append(f"Component {i}: {v*100:.2f}% variance explained")
-    elif method == "KPCA":
-        lines.append(f"Kernel PCA (kernel={info.get('kernel')}, gamma={info.get('gamma')}, degree={info.get('degree')})")
-        lines.append(f"Components: {info.get('n_components')}")
-    elif method == "Nystroem":
-        lines.append(f"Nystroem approximation (kernel={info.get('kernel')}, gamma={info.get('gamma')}, degree={info.get('degree')})")
+    elif method in ["kpca", "nystroem"]:
+        lines.append(f"{mdisp} (kernel={info.get('kernel')}, gamma={info.get('gamma')}, degree={info.get('degree')})")
         lines.append(f"Components: {info.get('n_components')}")
     if lines:
         gs.run_command("r3.support", map=outmap, description="\n".join(lines), quiet=True)
@@ -305,6 +312,9 @@ def preprocess_hyperspectral(
     dr_l1_ratio=0.0, dr_random_state=0):
 
     _savgol_preserve_nan, _baseline_correction, _continuum_removal, _apply_dimensionality_reduction = _load_processing_libs()
+
+    if dr_method:
+        dr_method = dr_method.lower()
 
     if (int(polyorder) == 0 and not baseline and not continuum
             and not clamp_negative and not interpolate_nodata
@@ -322,7 +332,7 @@ def preprocess_hyperspectral(
     if continuum:
         steps.append("Continuum removal")
     if dr_method:
-        steps.append(dr_method)
+        steps.append(dr_method.upper())
     gs.message(" → ".join(steps) if steps else "No operations selected")
 
     arr_in = garray.array3d(mapname=inp, null="nan", dtype=np.float32)
@@ -382,9 +392,8 @@ def preprocess_hyperspectral(
     arr_out = flat_filt.T.reshape(n_bands, rows, cols)
     arr_out[:, exterior_mask] = np.nan
 
-    # --- temporary region only for DR writing ---
     if dr_method:
-        orig_region = gs.region()  # capture before use_temp_region
+        orig_region = gs.region()
         gs.use_temp_region()
         try:
             gs.run_command(
@@ -425,7 +434,7 @@ def main():
         clamp_negative=bool(flags.get("z")),
         baseline=bool(flags.get("b")),
         continuum=bool(flags.get("c")),
-        dr_method=options["dr_method"] or None,
+        dr_method=(options["dr_method"] or "").lower() or None,
         dr_components=int(options["dr_components"]),
         dr_kernel=options["dr_kernel"],
         dr_gamma=float(options["dr_gamma"]),

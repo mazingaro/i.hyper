@@ -28,29 +28,18 @@ def _parse_band_intervals(band_string, wavelengths):
 
 
 def _choose_train_subset(X_valid, memory_limit_gb, cols, min_train=2000):
-    """
-    Choose a training subset size so that model fit stays within memory budget.
-    Heuristic: roughly allow 1.5x cols * rows * 4 bytes, capped by n_samples.
-    """
-    # 4 bytes per float32, × 1.5 safety factor
+    """Choose training subset size based on memory budget."""
     bytes_per_row = int(1.5 * cols * 4)
     max_rows = int((memory_limit_gb * (1024 ** 3)) // max(bytes_per_row, 1))
     max_rows = max(min_train, max_rows)
     return min(max_rows, X_valid.shape[0])
 
 
-def _fit_once_then_transform_in_chunks(
-    X_valid, valid_mask, transformer_fit, transformer_transform, out_dim,
-    chunk_size
-):
-    """
-    Fit transformer once on X_train, then transform X_valid in chunks.
-    Returns full-size array aligned to original X with NaNs on invalid rows.
-    """
+def _fit_once_then_transform_in_chunks(X_valid, valid_mask, transformer_fit, transformer_transform, out_dim, chunk_size):
+    """Fit transformer once, then transform X_valid in chunks, filling invalid rows with NaN."""
     X_red = np.full((valid_mask.shape[0], out_dim), np.nan, dtype=np.float32)
     idx_valid = np.flatnonzero(valid_mask)
 
-    # Transform in chunks
     for start in range(0, X_valid.shape[0], chunk_size):
         end = min(start + chunk_size, X_valid.shape[0])
         X_chunk = X_valid[start:end]
@@ -72,7 +61,6 @@ def _apply_dimensionality_reduction(
     export_path=None,
     chunk_size=None,
     memory_limit_gb=8,
-    # new generic params
     max_iter=200,
     tol=1e-4,
     alpha=0.0,
@@ -81,28 +69,15 @@ def _apply_dimensionality_reduction(
 ):
     """
     Apply dimensionality reduction to flattened HSI.
-    Strategy:
-      1) Optional band filtering.
-      2) Determine valid spectra.
-      3) Choose a training subset that fits memory.
-      4) Fit once on training subset.
-      5) Transform all valid data in chunks with the fitted model.
 
-    Methods:
-      - PCA
-      - KPCA
-      - Nystroem + PCA
-      - FastICA
-      - TruncatedSVD
-      - NMF
-      - SparsePCA
-
-    Notes:
-      - KPCA: transform cost scales with training set size due to kernel matrix.
-        This is an approximation when training set << all pixels.
-      - Nystroem: low-rank kernel approximation, then PCA. Good trade-off.
-      - NMF: requires non-negative inputs; transform solves NNLS per chunk.
-      - Chunking here refers to transform stage. Fit happens once on a subset.
+    Supported methods (lowercase internally):
+      - pca
+      - kpca
+      - nystroem
+      - fastica
+      - truncatedsvd
+      - nmf
+      - sparsepca
     """
     info = {}
     X = flat_data
@@ -117,6 +92,9 @@ def _apply_dimensionality_reduction(
     if not method:
         return X.astype(np.float32), info
 
+    # Normalize method name
+    method = method.lower()
+
     # Validate components
     if n_components <= 0 or n_components > X.shape[1]:
         n_components = min(10, X.shape[1])
@@ -127,14 +105,14 @@ def _apply_dimensionality_reduction(
         raise ValueError("No valid spectra for dimensionality reduction.")
     X_valid = X[valid_mask]
 
-    # Determine chunk size for transform
+    # Determine chunk size
     if chunk_size is None:
         bytes_per_val = 4
         total_cols = X_valid.shape[1]
         chunk_size = int((memory_limit_gb * (1024 ** 3)) / (bytes_per_val * total_cols))
         chunk_size = max(5000, min(chunk_size, X_valid.shape[0]))
 
-    # Choose training subset for fitting
+    # Training subset
     train_rows = _choose_train_subset(X_valid, memory_limit_gb, X_valid.shape[1])
     if train_rows < X_valid.shape[0]:
         rng = np.random.default_rng(random_state if random_state else None)
@@ -147,8 +125,8 @@ def _apply_dimensionality_reduction(
     feature_map = None
     pca_after = None
 
-    # Fit once
-    if method == "PCA":
+    # --- Reduction methods ---
+    if method == "pca":
         model = PCA(n_components=n_components, random_state=random_state)
         model.fit(X_train)
         out_dim = model.n_components_
@@ -156,14 +134,13 @@ def _apply_dimensionality_reduction(
 
         def _transform(Z): return model.transform(Z)
 
-    elif method == "KPCA":
+    elif method == "kpca":
         model = KernelPCA(
             n_components=n_components,
             kernel=kernel,
             gamma=gamma,
             degree=degree,
             fit_inverse_transform=False,
-            n_jobs=None,
             eigen_solver="auto",
             remove_zero_eig=True,
             random_state=random_state
@@ -174,7 +151,7 @@ def _apply_dimensionality_reduction(
 
         def _transform(Z): return model.transform(Z)
 
-    elif method == "Nystroem":
+    elif method == "nystroem":
         feature_map = Nystroem(kernel=kernel, gamma=gamma, degree=degree, n_components=max(n_components, 50), random_state=random_state)
         Z_train = feature_map.fit_transform(X_train)
         pca_after = PCA(n_components=min(n_components, Z_train.shape[1]), random_state=random_state)
@@ -190,7 +167,7 @@ def _apply_dimensionality_reduction(
             Zm = feature_map.transform(Z)
             return pca_after.transform(Zm)
 
-    elif method == "FastICA":
+    elif method == "fastica":
         model = FastICA(
             n_components=n_components,
             max_iter=max_iter,
@@ -202,7 +179,7 @@ def _apply_dimensionality_reduction(
 
         def _transform(Z): return model.transform(Z)
 
-    elif method == "TruncatedSVD":
+    elif method == "truncatedsvd":
         model = TruncatedSVD(n_components=n_components, random_state=random_state)
         model.fit(X_train)
         out_dim = n_components
@@ -211,7 +188,7 @@ def _apply_dimensionality_reduction(
 
         def _transform(Z): return model.transform(Z)
 
-    elif method == "NMF":
+    elif method == "nmf":
         if np.nanmin(X_train) < 0:
             raise ValueError("NMF requires non-negative data. Use clamp-to-zero or rescale before NMF.")
         model = NMF(
@@ -224,7 +201,7 @@ def _apply_dimensionality_reduction(
             l1_ratio=l1_ratio,
             random_state=random_state
         )
-        W_train = model.fit_transform(X_train)  # fit
+        model.fit_transform(X_train)
         out_dim = n_components
 
         def _transform(Z):
@@ -232,7 +209,7 @@ def _apply_dimensionality_reduction(
                 raise ValueError("NMF transform requires non-negative data.")
             return model.transform(Z)
 
-    elif method == "SparsePCA":
+    elif method == "sparsepca":
         model = SparsePCA(
             n_components=n_components,
             alpha=alpha if alpha > 0 else 1.0,
@@ -250,14 +227,14 @@ def _apply_dimensionality_reduction(
     else:
         raise ValueError(f"Unsupported dimensionality reduction method: {method}")
 
-    # Transform valid data in chunks with the single fitted model
+    # Transform valid data in chunks
     X_red = _fit_once_then_transform_in_chunks(
         X_valid, valid_mask, None, _transform, out_dim, chunk_size
     )
 
-    # Export trained objects
+    # Export trained models
     if export_path:
-        if method == "Nystroem":
+        if method == "nystroem":
             joblib.dump((feature_map, pca_after), export_path)
         else:
             joblib.dump(model, export_path)
