@@ -96,15 +96,28 @@ def _band_wavelengths(mapname, expected):
 
     return wavelengths, fwhm
 
-def _band_units(mapname):
+def _band_measurement(mapname):
     """
-    Return the units string from the r3.info description/comments.
-    If not found or 'unitless/none', return None (caller will assume reflectance).
+    Return the measurement string (e.g., 'toa_radiance') from r3.info comments.
+    If not found, return None.
     """
     txt = gs.read_command("r3.info", map=mapname)
     for raw in txt.splitlines():
         line = raw.strip().strip("| ").rstrip("| ").strip()
-        if line.lower().startswith("units:"):
+        if line.lstrip().lower().startswith("measurement:"):
+            val = line.split(":", 1)[1].strip()
+            return val if val else None
+    return None
+
+def _band_units(mapname):
+    """
+    Return the 'Measurement Units' string from the r3.info description/comments.
+    If not found or 'unitless/none', return None.
+    """
+    txt = gs.read_command("r3.info", map=mapname)
+    for raw in txt.splitlines():
+        line = raw.strip().strip("| ").rstrip("| ").strip()
+        if line.lstrip().lower().startswith("measurement units:"):
             val = line.split(":", 1)[1].strip()
             if val and val.lower() not in ("unitless", "none", "units", "1"):
                 return val
@@ -199,11 +212,19 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
         xlabel = "Components"
         ylabel = "Value"  # <- per requirement: no units if components present
     else:
-        # otherwise use wavelength X label and units logic for Y label
-        # Y label: prefer common units if provided; else assume reflectance
+        # otherwise use wavelength X label and measurement/units logic for Y label
+        ds_meas = [ds.get("measurement") for ds in datasets if ds.get("measurement")]
         ds_units = [ds.get("units") for ds in datasets if ds.get("units")]
-        if ds_units and all(u == ds_units[0] for u in ds_units):
-            ylabel = ds_units[0]
+
+        common_meas = ds_meas[0] if ds_meas and all(m == ds_meas[0] for m in ds_meas) else None
+        common_units = ds_units[0] if ds_units and all(u == ds_units[0] for u in ds_units) else None
+
+        if common_meas and common_units:
+            ylabel = f"{common_meas} [{common_units}]"
+        elif common_meas:
+            ylabel = common_meas
+        elif common_units:
+            ylabel = common_units
         else:
             ylabel = "Reflectance (unitless)"
 
@@ -373,6 +394,7 @@ def main(options, flags):
             values = _sample_all_bands_at_point(mapname, e, n, band_count)
             points.append({"x": e, "y": n, "values": values})
 
+        measurement = _band_measurement(mapname)
         units = _band_units(mapname)         # may be None → assumed reflectance later (if not components)
         has_comp = _has_components(mapname)  # PCA → axis switch
 
@@ -380,6 +402,7 @@ def main(options, flags):
             "map": mapname,
             "wavelength_nm": wavelengths,
             "points": points,
+            "measurement": measurement,
             "units": units,
             "components": has_comp,
             "band_count": band_count,

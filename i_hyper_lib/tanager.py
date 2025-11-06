@@ -160,12 +160,17 @@ def import_tanager(
         cube.write(mapname=f"{output_name}", null="nan", overwrite=True)
         gs.info(f"Created 3D raster with all bands: {output_name} ({bands_total} slices).")
 
-        # r3 metadata (wavelengths & FWHM + Units)
+        # r3 metadata (wavelengths & FWHM + Units + Data Field)
         try:
             desc = ["Hyperspectral Metadata:", f"Valid Bands: {bands_total}"]
-            # write units from the HDF5 dataset (or sensible fallback already resolved in reader)
+
+            # NEW: record which data field was imported (so data_field is actually used)
+            if getattr(prod, "data_field", None):
+                desc.append(f"Measurement: {prod.data_field}")
+
+            # keep existing units line (parsed by i.hyper.explore)
             if getattr(prod, "data_units", None):
-                desc.append(f"Units: {prod.data_units}")
+                desc.append(f"Measurement Units: {prod.data_units}")
 
             for i in range(bands_total):
                 wl_i = float(wl[i])
@@ -183,8 +188,6 @@ def import_tanager(
         gs.warning(f"3D cube creation failed: {e}")
 
     # -------------------------- composites --------------------------
-    # Create band rasters on demand; reuse cached maps
-    # Prime RGB bands so region aligns to a real raster before color enhancement
     rgb_target = COMPOSITES["RGB"]
     rgb_indices_1b = [_find_nearest_band_1based(w, wl) for w in rgb_target]
     for idx1 in rgb_indices_1b:
@@ -216,7 +219,6 @@ def import_tanager(
         Module("g.remove", type="raster", name=",".join(created_names), flags="f", quiet=True)
 
     gs.del_temp_region()
-
 
 # -------------------------- entry --------------------------
 
