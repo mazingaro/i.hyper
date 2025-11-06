@@ -22,7 +22,7 @@
 # % type: string
 # % required: yes
 # % multiple: no
-# % options: PRISMA, EnMAP, Tanager-1
+# % options: PRISMA, EnMAP, Tanager
 # % answer: PRISMA
 # % description: Define the hyperspectral product you want to import.
 # % guisection: Input
@@ -75,7 +75,7 @@ from grass.script.utils import get_lib_path
 PRODUCT_MODULE_MAP = {
     "EnMAP": "enmap",
     "PRISMA": "prisma",
-    "Tanager-1": "tanager",
+    "Tanager": "tanager",
 }
 
 def import_by_product(product, options, flags):
