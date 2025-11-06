@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 ##############################################################################
 # MODULE:    i.hyper.import
-# AUTHOR(S): Alen Mangafic <alen.mangafic@gis.si>
+# AUTHOR(S): Alen Mangafic and Tomaž Žagar, Geodetic Institute of Slovenia
 # PURPOSE:   Hyperspectral imagery import.
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
 ##############################################################################
@@ -22,8 +22,8 @@
 # % type: string
 # % required: yes
 # % multiple: no
-# % options: EnMAP,PRISMA,Tanager-1,Hyperion
-# % answer: EnMAP
+# % options: PRISMA, EnMAP, Tanager-1
+# % answer: PRISMA
 # % description: Define the hyperspectral product you want to import.
 # % guisection: Input
 # %end
@@ -76,7 +76,6 @@ PRODUCT_MODULE_MAP = {
     "EnMAP": "enmap",
     "PRISMA": "prisma",
     "Tanager-1": "tanager",
-    #"Hyperion": "hyperion",
 }
 
 def import_by_product(product, options, flags):
