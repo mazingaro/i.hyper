@@ -6,7 +6,7 @@ Tanager BASIC → GRASS
 - Projects and resamples to the target map grid defined by Planet_Ortho_Framing
   using bilinear forward splatting with small-neighborhood nearest fill for purely
   geometric gaps (optional; SciPy if available)
-- Writes a full 3D raster cube (bands in Z) and per-band composites
+- Writes a full 3D raster (bands in Z) and per-band composites
 - Preserves nodata (nodata_pixels==1) as NULLs in GRASS
 """
 
@@ -70,7 +70,7 @@ def import_tanager(
 ):
     """
     Import, project, and resample Tanager BASIC to the target map grid. Writes:
-      - 3D raster cube (bands as slices)
+      - 3D raster (bands as slices)
       - per-band temporary rasters for composites
       - color-enhanced composites
 
@@ -158,7 +158,7 @@ def import_tanager(
             cube[k, :, :] = ortho2d
 
         cube.write(mapname=f"{output_name}", null="nan", overwrite=True)
-        gs.info(f"Created 3D raster cube with all bands: {output_name} ({bands_total} slices).")
+        gs.info(f"Created 3D raster with all bands: {output_name} ({bands_total} slices).")
 
         # r3 metadata (wavelengths & FWHM + Units)
         try:

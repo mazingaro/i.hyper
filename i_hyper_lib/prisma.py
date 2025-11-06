@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-# PRISMA L2D → GRASS (2D reflectance; composite-only, EnMAP-style composite block)
-# - Same entrypoints: run_import() -> import_prisma(...)
-# - Writes float32 REFLECTANCE (0..1) to TEMP band maps, builds composites like EnMAP code does, then deletes temps
-# - Transpose to (E,N) before writing; region rows=E, cols=N
+"""
+PRISMA L2D importer:
+- Loads VNIR+SWIR PRISMA L2D data and builds a full 3D raster (r3) of reflectance (float32).
+- Creates selected 3-band composites (RGB, CIR, SWIR_* or custom wavelengths) by nearest-band lookup.
+- Sets region to match the transposed (E, N) raster layout and writes NULLs outside the valid footprint.
+- Enhances colors via i.colors.enhance and assembles final composites with r.composite; temp bands are cleaned up.
+Entry points:
+  - import_prisma(input_path, output_name, composites=None, custom_wavelengths=None, strength_val=96, import_null=False)
+  - run_import(options, flags)  # wrapper for module CLI
+Requires: prisma_reader.{load_prisma_l2d, concatenate_hyperspectral}
+"""
 
 import os
 import uuid
@@ -95,7 +102,6 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
     _require(prod.swir and prod.swir.dn is not None, "SWIR cube missing.")
 
     # Reflectance cube (N,E,B) and wavelengths
-    # NOTE: capturing fwhm as well for r3 metadata compatibility with EnMAP
     refl, wavelengths, fwhm = concatenate_hyperspectral(prod)  # float32 0..1
     _require(refl.ndim == 3, f"Unexpected reflectance shape: {refl.shape}")
 
@@ -145,8 +151,7 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
             gs.fatal("Custom composites must provide exactly 3 wavelengths (e.g., 850,1650,660)")
         wanted.append(("CUSTOM", [float(x) for x in custom_wavelengths]))
 
-    # --- EnMAP-style band handling:
-    # We'll create temp rasters only for bands we need, and reuse them via a dict keyed by 1-based band index.
+    # create temp rasters only for bands we need, and reuse them via a dict keyed by 1-based band index.
     temp_bands = {}  # {band_idx_1based: raster_name}
     created_names = []  # for final cleanup
 
@@ -163,7 +168,7 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
         created_names.append(name)
         return name
 
-    # Prime the "rgb_enhanced" mapping exactly like EnMAP:
+    # Prime the "rgb_enhanced" mapping:
     rgb_target = COMPOSITES["RGB"]
     rgb_indices_1b = [_find_nearest_band_1based(w, wavelengths) for w in rgb_target]
     # Create these bands now and cache
@@ -184,7 +189,7 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
         nsres2d = float(reg2d["nsres"])
         ewres2d = float(reg2d["ewres"])
 
-        # -------- spectral (Z) axis in nanometers like EnMAP --------
+        # -------- spectral (Z) axis in nanometers --------
         if wavelengths is not None and len(wavelengths) > 0:
             wl = np.asarray(wavelengths, dtype=float)
             if wl.size > 1:
@@ -193,14 +198,11 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
             else:
                 tbres_nm = 1.0
             bottom_nm = float(wl[0])
-            # IMPORTANT: GRASS depth behaves like depth = int((t - b) / tbres)
-            # so we set t = b + tbres * bands_total to get depth == bands_total
-            top_nm = bottom_nm + tbres_nm * bands_total  # <-- fix off-by-one
+            # set t = b + tbres * bands_total to get depth == bands_total
+            top_nm = bottom_nm + tbres_nm * bands_total
         else:
             bottom_nm, top_nm, tbres_nm = 0.0, float(bands_total), 1.0
 
-        # 3) Set ONLY 3D params: mirror XY resolutions and define Z (bottom/top/tbres)
-        #    NOTE: rows3/cols3 DO NOT EXIST; they are derived from extents + nsres3/ewres3.
         gs.run_command(
             "g.region",
             nsres3=nsres2d,
@@ -211,20 +213,19 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
             quiet=True,
         )
 
-        # 4) Create and fill the 3D array: (band, row(E), col(N))
+        # Create and fill the 3D array: (band, row(E), col(N))
         cube = garray.array3d(dtype=np.float32)
         for k in range(bands_total):
             cube[k, :, :] = refl[:, :, k].T.astype(np.float32)
 
-        # write 3D raster under the final output name (compat with EnMAP)
+        # write 3D raster under the final output name
         cube.write(mapname=f"{output_name}", null="nan", overwrite=True)  # NaNs -> NULLs
-        gs.info(f"Created 3D raster cube with all bands: {output_name} ({bands_total} slices).")
+        gs.info(f"Created 3D raster with all bands: {output_name} ({bands_total} slices).")
 
-        # -------- r3 metadata to match EnMAP's r3.support pattern --------
+        # -------- r3 metadata --------
         try:
             count_meta = int(min(bands_total, len(wavelengths)))
             desc_lines = ["Hyperspectral Metadata:", f"Valid Bands: {count_meta}"]
-            # Use 1-based band indices like EnMAP metadata
             for i in range(count_meta):
                 wl_i = float(wavelengths[i])
                 fwhm_i = float(fwhm[i]) if i < len(fwhm) else float("nan")
@@ -245,7 +246,6 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
     # For each requested composite, select bands and build r.composite
     for name, targets in wanted:
         bands_1b = [_find_nearest_band_1based(w, wavelengths) for w in targets]
-        # EnMAP logic: reuse enhanced RGB maps when available, otherwise fallback to band rasters
         rgb_maps = []
         for idx1 in bands_1b:
             if idx1 in rgb_enhanced:
@@ -253,7 +253,6 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
             else:
                 rgb_maps.append(ensure_band_written(idx1))
 
-        # EnMAP: set region to first map and enhance (RGB with -p, others normal)
         Module("g.region", raster=rgb_maps[0], quiet=True)
         if name.upper() == "RGB":
             Module("i.colors.enhance", red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
@@ -274,7 +273,6 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
 
     gs.del_temp_region()
 
-# -------------------------- entry (same) --------------------------
 def run_import(options, flags):
     custom = None
     if options.get("composites_custom"):
