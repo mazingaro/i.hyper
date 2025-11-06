@@ -245,7 +245,6 @@ def _fill_nans_1d(x):
 
 
 def _get_wavelengths_from_r3info(mapname):
-    """Read wavelengths from r3.info metadata if present."""
     try:
         meta = gs.read_command("r3.info", map=mapname)
     except Exception:
@@ -326,9 +325,6 @@ def preprocess_hyperspectral(
         steps.append(dr_method)
     gs.message(" → ".join(steps) if steps else "No operations selected")
 
-    gs.use_temp_region()
-    gs.run_command("g.region", raster_3d=inp, quiet=True)
-
     arr_in = garray.array3d(mapname=inp, null="nan", dtype=np.float32)
     depth, rows, cols = arr_in.shape
     exterior_mask = ~np.any(np.isfinite(arr_in), axis=0)
@@ -386,75 +382,62 @@ def preprocess_hyperspectral(
     arr_out = flat_filt.T.reshape(n_bands, rows, cols)
     arr_out[:, exterior_mask] = np.nan
 
-    gs.use_temp_region()
-    gs.run_command("g.region", raster_3d=inp, b=0, t=n_bands, quiet=True)
+    # --- temporary region only for DR writing ---
+    if dr_method:
+        orig_region = gs.region()  # capture before use_temp_region
+        gs.use_temp_region()
+        try:
+            gs.run_command(
+                "g.region",
+                n=orig_region["n"], s=orig_region["s"],
+                e=orig_region["e"], w=orig_region["w"],
+                nsres=orig_region["nsres"], ewres=orig_region["ewres"],
+                b=0, t=float(n_bands), tbres=1, quiet=True
+            )
+            out_arr = garray.array3d(dtype=np.float32)
+            out_arr[...] = arr_out
+            out_arr.write(mapname=out, null="nan", overwrite=True)
+        finally:
+            gs.del_temp_region()
+    else:
+        out_arr = garray.array3d(dtype=np.float32)
+        out_arr[...] = arr_out
+        out_arr.write(mapname=out, null="nan", overwrite=True)
 
-    out_arr = garray.array3d(dtype=np.float32)
-    out_arr[...] = arr_out
-    out_arr.write(mapname=out, null="nan", overwrite=True)
-
-    gs.del_temp_region()
-
-    # --- Metadata handling and command recording ---
     _copy_r3_metadata(inp, out)
     if dr_method:
         _set_dr_metadata(out, dr_method, dr_info or {})
 
-    # Write exact command used to Comments
     cmd_line = "i.hyper.preproc " + " ".join(sys.argv[1:])
     gs.run_command("r3.support", map=out, history=cmd_line, quiet=True)
-
-    gs.run_command("g.region", raster_3d=out, quiet=True)
 
 
 def main():
     options, flags = gs.parser()
 
-    wl = int(options["window_length"])
-    poly = int(options["polyorder"])
-    deriv = int(options["derivative_order"])
-
-    baseline = bool(flags.get("b"))
-    continuum = bool(flags.get("c"))
-    interp = bool(flags.get("q"))
-    clamp = bool(flags.get("z"))
-    dr_method = options["dr_method"] or None
-    dr_components = int(options["dr_components"])
-    dr_kernel = options["dr_kernel"]
-    dr_gamma = float(options["dr_gamma"])
-    dr_degree = int(options["dr_degree"])
-    dr_chunk_size = int(options["dr_chunk_size"])
-    dr_bands = options["dr_bands"] or None
-    dr_export = options["dr_export"] or None
-    dr_max_iter = int(options["dr_max_iter"])
-    dr_tol = float(options["dr_tol"])
-    dr_alpha = float(options["dr_alpha"])
-    dr_l1_ratio = float(options["dr_l1_ratio"])
-    dr_random_state = int(options["dr_random_state"])
-
     preprocess_hyperspectral(
         inp=options["input"],
         out=options["output"],
-        window_length=wl,
-        polyorder=poly,
-        derivative_order=deriv,
-        interpolate_nodata=interp,
-        clamp_negative=clamp,
-        baseline=baseline,
-        continuum=continuum,
-        dr_method=dr_method,
-        dr_components=dr_components,
-        dr_kernel=dr_kernel,
-        dr_gamma=dr_gamma,
-        dr_degree=dr_degree,
-        dr_bands=dr_bands,
-        dr_export=dr_export,
-        dr_chunk_size=dr_chunk_size,
-        dr_max_iter=dr_max_iter,
-        dr_tol=dr_tol,
-        dr_alpha=dr_alpha,
-        dr_l1_ratio=dr_l1_ratio,
-        dr_random_state=dr_random_state
+        window_length=int(options["window_length"]),
+        polyorder=int(options["polyorder"]),
+        derivative_order=int(options["derivative_order"]),
+        interpolate_nodata=bool(flags.get("q")),
+        clamp_negative=bool(flags.get("z")),
+        baseline=bool(flags.get("b")),
+        continuum=bool(flags.get("c")),
+        dr_method=options["dr_method"] or None,
+        dr_components=int(options["dr_components"]),
+        dr_kernel=options["dr_kernel"],
+        dr_gamma=float(options["dr_gamma"]),
+        dr_degree=int(options["dr_degree"]),
+        dr_bands=options["dr_bands"] or None,
+        dr_export=options["dr_export"] or None,
+        dr_chunk_size=int(options["dr_chunk_size"]),
+        dr_max_iter=int(options["dr_max_iter"]),
+        dr_tol=float(options["dr_tol"]),
+        dr_alpha=float(options["dr_alpha"]),
+        dr_l1_ratio=float(options["dr_l1_ratio"]),
+        dr_random_state=int(options["dr_random_state"]),
     )
 
 

@@ -48,13 +48,14 @@ def _fit_once_then_transform_in_chunks(
     Returns full-size array aligned to original X with NaNs on invalid rows.
     """
     X_red = np.full((valid_mask.shape[0], out_dim), np.nan, dtype=np.float32)
+    idx_valid = np.flatnonzero(valid_mask)
 
     # Transform in chunks
     for start in range(0, X_valid.shape[0], chunk_size):
         end = min(start + chunk_size, X_valid.shape[0])
         X_chunk = X_valid[start:end]
         X_red_chunk = transformer_transform(X_chunk)
-        X_red[valid_mask][start:end] = X_red_chunk.astype(np.float32)
+        X_red[idx_valid[start:end], :] = X_red_chunk.astype(np.float32)
 
     return X_red
 
@@ -162,7 +163,7 @@ def _apply_dimensionality_reduction(
             gamma=gamma,
             degree=degree,
             fit_inverse_transform=False,
-            n_jobs=None,  # keep default
+            n_jobs=None,
             eigen_solver="auto",
             remove_zero_eig=True,
             random_state=random_state
@@ -205,14 +206,12 @@ def _apply_dimensionality_reduction(
         model = TruncatedSVD(n_components=n_components, random_state=random_state)
         model.fit(X_train)
         out_dim = n_components
-        # explained_variance_ratio_ exists for SVD
         if hasattr(model, "explained_variance_ratio_"):
             info["explained_variance_ratio"] = model.explained_variance_ratio_
 
         def _transform(Z): return model.transform(Z)
 
     elif method == "NMF":
-        # Ensure non-negative
         if np.nanmin(X_train) < 0:
             raise ValueError("NMF requires non-negative data. Use clamp-to-zero or rescale before NMF.")
         model = NMF(
@@ -236,7 +235,7 @@ def _apply_dimensionality_reduction(
     elif method == "SparsePCA":
         model = SparsePCA(
             n_components=n_components,
-            alpha=alpha if alpha > 0 else 1.0,  # sklearn default
+            alpha=alpha if alpha > 0 else 1.0,
             ridge_alpha=0.01,
             max_iter=max_iter,
             tol=tol,
