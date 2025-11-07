@@ -71,7 +71,7 @@ Generated composite raster: prisma_rgb
 Generated composite raster: prisma_cir
 Generated composite raster: prisma_swir_agriculture
 Generated composite raster: prisma_swir_geology
-(Thu Nov  6 16:26:49 2025) Command finished (1 min 23 sec)
+(Fri Nov  5 13:12:00 2025) Command finished (1 min 23 sec)
 </pre></div>
 
 <div align="center" style="margin: 10px">
@@ -87,34 +87,53 @@ Generated composite raster: prisma_swir_geology
 i.hyper.import input=/data/EnMAP_data_folder/ \
                product=enmap \
                output=enmap \
-               composites='rgb,cir'
-</pre></div>
-
-<div class="code"><pre>
-# Tanager example with a custom-defined composite
-i.hyper.import input=/data/Tanager.h5 \
-               product=tanager \
-               output=tanager \
-               composites='swir_agriculture' \
+               composites='cir,swir_agriculture'
                composites_custom='650,1650,2200'
 </pre></div>
 
-<h2>SEE ALSO</h2>
+<div align="center" style="margin: 10px">
+<div align="center" style="margin: 10px">
+  <img src="import_example2.png" width="600" height="600"
+       alt="EnMAP SWIR-agriculture composite example" border="0"><br>
+  <i>Figure: EnMAP SWIR-agriculture composite generated with i.hyper.import</i><br>
+  <small><i>Data source: Copyright © 2012-2025 EnMAP at Earth Observation Center EOC of DLR.</i></small>
+</div>
 
-<a href="https://grass.osgeo.org/grass-stable/manuals/r.external.html">r.external</a>,
-<a href="https://grass.osgeo.org/grass-stable/manuals/r.to.rast3.html">r.to.rast3</a>,
-<a href="https://grass.osgeo.org/grass-stable/manuals/r3.support.html">r3.support</a>,
-<a href="https://grass.osgeo.org/grass-stable/manuals/i.group.html">i.group</a>,
+<div class="code"><pre>
+# Tanager example with a custom-defined composite
+# This one has radiance values
+i.hyper.import input=/data/Tanager.h5 \
+               product=tanager \
+               output=tanager \
+               composites='rgb, \
+</pre></div>
+
+<div align="center" style="margin: 10px">
+<div align="center" style="margin: 10px">
+  <img src="import_example3.png" width="600" height="600"
+       alt="Tanager-1 RGB composite example" border="0"><br>
+  <i>Figure: Tanager-1 RGB composite generated with i.hyper.import</i><br>
+  <small><i>Data source: Planet Labs - Open Data, CC-BY-4.0.</i></small>
+</div>
+
+<h2>SEE ALSO</h2>
+<a href="https://www.enmap.org/data_tools/exampledata/">EnMAP Example Data Products</a>,
+<a href="https://www.planet.com/data/stac/browser/tanager-core-imagery/catalog.json">Tanager Core Imagery</a>,
 <a href="i.hyper.preproc.html">i.hyper.preproc</a>,
 <a href="i.hyper.explore.html">i.hyper.explore</a>,
 <a href="i.hyper.composite.html">i.hyper.composite</a>,
 <a href="i.hyper.export.html">i.hyper.export</a>
+<a href="https://grass.osgeo.org/grass-stable/manuals/r3.support.html">r3.support</a>,
+<a href="https://grass.osgeo.org/grass-stable/manuals/r3.stats.html">r3.stats</a>
+<a href="https://grass.osgeo.org/grass-stable/manuals/r3.univar.html">r3.stats</a>
 
 <h2>DEPENDENCIES</h2>
 
 <ul>
   <li><b>NumPy</b> – Core numerical operations and array manipulation.</li>
   <li><b>h5py</b> – Interface for reading and writing <code>.h5</code> (HDF5) hyperspectral data products such as PRISMA and Tanager.</li>
+  <li><b>h5py</b> – Interface for reading and writing <code>.h5</code> (HDF5) hyperspectral data products such as PRISMA and Tanager.</li>
+  <li><b>pyproj</b> – Coordinate reference system and geospatial transformation library.</li>
 </ul>
 
 <h2>AUTHORS</h2>
