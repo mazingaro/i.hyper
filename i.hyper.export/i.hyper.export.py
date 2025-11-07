@@ -2,7 +2,7 @@
 
 ##############################################################################
 # MODULE:    i.hyper.export
-# AUTHOR(S): Alen Mangafic <alen.mangafic@gis.si>
+# AUTHOR(S): Alen Mangafic and Tomaž Žagar, Geodetic Institute of Slovenia
 # PURPOSE:   Export 3D hyperspectral raster cube as a compressed multi-band GeoTIFF.
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
 ##############################################################################
