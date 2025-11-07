@@ -1,35 +1,172 @@
 <h2>DESCRIPTION</h2>
 
-The purpose of  <em>i.hyper.preproc</em> is to compute ...
-Parameter <b>input</b> is a ...
+<p><em>i.hyper.preproc</em> performs preprocessing of hyperspectral data stored as a 3D raster map (<code>raster_3d</code>).
+It is designed to improve data quality, suppress noise, and transform the spectral dimension into representations
+better suited for scientific analysis and machine learning workflows.</p>
+
+<p>The module operates directly on hyperspectral cubes imported with
+<a href="i.hyper.import.html">i.hyper.import</a> or other compatible 3D raster datasets.
+All transformations are performed along the spectral (<em>z</em>) dimension for each spatial position (<em>x, y</em>).
+<p>Preprocessing steps can be chained together in a pipeline, specified with the <code>steps</code> option.
+Each stage is executed sequentially according to the defined preprocessing pipeline.
+The module displays the full pipeline sequence in the console
+(for example: <code>Savitzky–Golay → Baseline correction → Continuum removal → PCA</code>),
+providing a clear overview of the operations applied in order.</p>
+
+
+<p><em>i.hyper.preproc</em> is part of the <b>i.hyper</b> module family and provides a reproducible, modular
+framework for spectral preprocessing prior to feature extraction, classification, or regression.
+All output maps are 3D rasters (<code>raster_3d</code>) compatible with the rest of the <em>i.hyper</em> suite.</p>
+
+<h2>FUNCTIONALITY</h2>
+
+<p>The following preprocessing methods are supported:</p>
+
+<ul>
+  <li><b>Savitzky–Golay (sav_gol)</b> – Polynomial smoothing and derivative computation to reduce spectral noise and enhance absorption features.</li>
+  <li><b>Baseline correction (baseline)</b> – Removes global trends or offsets in reflectance curves.</li>
+  <li><b>Continuum removal (cont_rem)</b> – Normalizes spectra to their convex hull to highlight relative absorption depths.</li>
+  <li><b>Principal Component Analysis (pca)</b> – Linear dimensionality reduction using eigen decomposition of covariance.</li>
+  <li><b>Kernel PCA (kpca)</b> – Nonlinear dimensionality reduction using kernel functions (RBF, polynomial, sigmoid).</li>
+  <li><b>Nystroem approximation (nystrom)</b> – Low-rank kernel approximation for efficient large-scale feature mapping.</li>
+  <li><b>Fast Independent Component Analysis (fastica)</b> – Separates statistically independent spectral sources or mixtures.</li>
+  <li><b>Truncated Singular Value Decomposition (tsvd)</b> – Linear dimensionality reduction preserving dominant singular vectors (useful for sparse data).</li>
+  <li><b>Non-negative Matrix Factorization (nmf)</b> – Decomposes spectra into additive non-negative basis components.</li>
+  <li><b>Sparse Principal Component Analysis (sparsepca)</b> – PCA variant enforcing sparsity on component loadings for interpretability.</li>
+</ul>
+
+<p>Multiple steps can be combined in one command by listing them in <code>steps=</code> (comma-separated).
+For example, <code>steps='sav_gol,baseline,cont_rem,kpca'</code> will execute all four in sequence.
+Intermediate rasters are handled internally and automatically cleaned up.</p>
 
 <h2>NOTES</h2>
-This is a recommended section to explain the algorithm and parameter
-behavior in a greater detail.
 
-<h2>EXAMPLE</h2>
+<p>The module is constructed as a preprocessing pipeline engine.
+Each transformation acts spectrally while preserving full spatial alignment.
+Operations are reported sequentially in the console log, showing the exact pipeline progression.
+The computational region remains unchanged throughout processing.</p>
+
+<p>When using PCA, KPCA, FastICA, NMF, or SparsePCA, the number of output components can be controlled using the
+<code>components</code> parameter. For suppressing verbose diagnostic outputs, use the <b>-q</b> flag (quiet mode).</p>
+
+<p>Results can be directly used by <em>i.hyper.explore</em>, <em>i.hyper.composite</em>, or exported to 2D representations
+with <em>i.hyper.export</em> for machine learning workflows.</p>
+
+<h2>EXAMPLES</h2>
+
 <div class="code"><pre>
-i.hyper.preproc input=input_map output=output_map
+# Example 1: Savitzky–Golay smoothing (basic denoising)
+i.hyper.preproc input=prisma output=prisma_savgol \
+                steps='sav_gol' \
+                window=7 poly_order=3
+
+# Console output:
+[1/1] Applying Savitzky–Golay smoothing (window=7, poly_order=3)
+Generated 3D raster map: prisma_savgol
 </pre></div>
 
-<div align="center" style="margin: 10px">
-    <a href="i_hyper_preproc.png">
-    <img src="i_hyper_preproc.png" width="600" height="600"
-         alt="i_hyper_preproc example" border="0">
-    </a><br>
-    <i>Figure: Output from example</i>
-</div>
+<div class="code"><pre>
+# Example 2: PCA transformation (quiet mode)
+i.hyper.preproc input=enmap output=enmap_pca \
+                steps='pca' components=10 -q
 
-<h2>REFERENCES</h2>
-This section is optional. List related publications here.
+# Console output:
+[1/1] Performing PCA (10 components)
+Variance output suppressed (-q)
+Generated 3D raster map: enmap_pca
+</pre></div>
+
+<div class="code"><pre>
+# Example 3: Kernel PCA for nonlinear feature reduction
+i.hyper.preproc input=enmap output=enmap_kpca \
+                steps='kpca' kernel=rbf components=20 gamma=0.001
+
+# Console output:
+[1/1] Performing Kernel PCA (kernel=RBF, gamma=0.001)
+Generated 3D raster map: enmap_kpca
+</pre></div>
+
+<div class="code"><pre>
+# Example 4: Nystroem approximation (fast kernel approximation)
+i.hyper.preproc input=tanager output=tanager_nystrom \
+                steps='nystrom' kernel=rbf components=30
+
+# Console output:
+[1/1] Performing Nystroem kernel approximation (30 components)
+Generated 3D raster map: tanager_nystrom
+</pre></div>
+
+<div class="code"><pre>
+# Example 5: FastICA for source separation
+i.hyper.preproc input=prisma output=prisma_ica \
+                steps='fastica' components=15
+
+# Console output:
+[1/1] Performing FastICA (15 independent components)
+Generated 3D raster map: prisma_ica
+</pre></div>
+
+<div class="code"><pre>
+# Example 6: Truncated SVD (efficient linear decomposition)
+i.hyper.preproc input=enmap output=enmap_tsvd \
+                steps='tsvd' components=25
+
+# Console output:
+[1/1] Performing Truncated SVD (25 components)
+Generated 3D raster map: enmap_tsvd
+</pre></div>
+
+<div class="code"><pre>
+# Example 7: Non-negative Matrix Factorization
+i.hyper.preproc input=tanager output=tanager_nmf \
+                steps='nmf' components=10
+
+# Console output:
+[1/1] Performing Non-negative Matrix Factorization (10 components)
+Generated 3D raster map: tanager_nmf
+</pre></div>
+
+<div class="code"><pre>
+# Example 8: Sparse PCA for interpretable components
+i.hyper.preproc input=enmap output=enmap_sparsepca \
+                steps='sparsepca' components=12 alpha=1.0
+
+# Console output:
+[1/1] Performing Sparse PCA (12 components, alpha=1.0)
+Generated 3D raster map: enmap_sparsepca
+</pre></div>
+
+<div class="code"><pre>
+# Example 9: Combined preprocessing pipeline
+i.hyper.preproc input=tanager output=tanager_ml \
+                steps='sav_gol,baseline,cont_rem,nystrom' \
+                window=9 poly_order=3 components=30
+
+# Console output:
+[1/4] Applying Savitzky–Golay smoothing (window=9, poly_order=3)
+[2/4] Performing baseline correction
+[3/4] Performing continuum removal
+[4/4] Performing Nystroem kernel approximation (30 components)
+Generated 3D raster map: tanager_ml
+</pre></div>
 
 <h2>SEE ALSO</h2>
-List related GRASS tools here.
-<em>
-<a href="https://grass.osgeo.org/grass-stable/manuals/g.region.html">g.region</a>,
-<a href="https://grass.osgeo.org/grass-stable/manuals/r.mapcalc.html">r.mapcalc</a>
-</em>
+
+<a href="i.hyper.import.html">i.hyper.import</a>,
+<a href="i.hyper.explore.html">i.hyper.explore</a>,
+<a href="i.hyper.composite.html">i.hyper.composite</a>,
+<a href="i.hyper.export.html">i.hyper.export</a>,
+<a href="https://grass.osgeo.org/grass-stable/manuals/r3.mapcalc.html">r3.mapcalc</a>,
+<a href="https://grass.osgeo.org/grass-stable/manuals/r3.stats.html">r3.stats</a>
+
+<h2>DEPENDENCIES</h2>
+
+<ul>
+  <li><b>NumPy</b> – Core numerical operations and array manipulation.</li>
+  <li><b>SciPy</b> – Signal processing routines (Savitzky–Golay, baseline fitting, convex hull).</li>
+  <li><b>scikit-learn</b> – Machine learning algorithms for PCA, KPCA, FastICA, NMF, SparsePCA, TruncatedSVD, and Nystroem.</li>
+</ul>
 
 <h2>AUTHORS</h2>
 
-Alen Mangafić
+Alen Mangafić and Tomaž Žagar, Geodetic Institute of Slovenia

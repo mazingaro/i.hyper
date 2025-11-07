@@ -24,7 +24,7 @@
 # % multiple: no
 # % options: prisma, enmap, tanager
 # % answer: prisma
-# % description: Define the hyperspectral product you want to import.
+# % description: Define the hyperspectral product you want to import (lowercase).
 # % guisection: Input
 # %end
 
