@@ -164,11 +164,9 @@ def import_tanager(
         try:
             desc = ["Hyperspectral Metadata:", f"Valid Bands: {bands_total}"]
 
-            # NEW: record which data field was imported (so data_field is actually used)
             if getattr(prod, "data_field", None):
                 desc.append(f"Measurement: {prod.data_field}")
 
-            # keep existing units line (parsed by i.hyper.explore)
             if getattr(prod, "data_units", None):
                 desc.append(f"Measurement Units: {prod.data_units}")
 
