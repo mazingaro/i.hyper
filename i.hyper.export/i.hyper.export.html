@@ -1,35 +1,52 @@
 <h2>DESCRIPTION</h2>
 
-The purpose of  <em>i.hyper.export</em> is to compute ...
-Parameter <b>input</b> is a ...
+<p><em>i.hyper.export</em> exports a hyperspectral 3D raster map (<code>raster_3d</code>) from GRASS to an external file.
+At present, the module supports export to a <b>compressed multi-band GeoTIFF</b> only.</p>
+
+<p>The export process converts the 3D raster map into 2D raster slices using <code>r3.to.rast</code>,
+creates a temporary imagery group, and writes all bands into a single multi-band GeoTIFF file with <code>r.out.gdal</code>.
+All temporary rasters and groups are automatically removed after export.</p>
+
+<h2>FUNCTIONALITY</h2>
+
+<ul>
+  <li>Exports the complete hyperspectral 3D raster map as a single multi-band GeoTIFF.</li>
+  <li>Preserves the spectral band order and spatial alignment of the input map.</li>
+  <li>Uses <b>DEFLATE</b> compression with <b>PREDICTOR=3</b> for efficient floating-point storage.</li>
+  <li>Handles null values as <code>-9999</code>.</li>
+  <li>Automatically sets the computational region to match the input 3D raster map.</li>
+</ul>
 
 <h2>NOTES</h2>
-This is a recommended section to explain the algorithm and parameter
-behavior in a greater detail.
 
-<h2>EXAMPLE</h2>
+<ul>
+  <li>Currently, only multi-band GeoTIFF export is supported.</li>
+  <li>All intermediate rasters and imagery groups are temporary and removed automatically after export.</li>
+  <li>The exported GeoTIFF contains spectral data only; wavelength and other metadata remain inside GRASS.</li>
+  <li>The output file can be opened in software such as QGIS, ENVI, or Python libraries (<code>rasterio</code>, <code>gdal</code>).</li>
+</ul>
+
+<h2>OPTIONS</h2>
+
+<ul>
+  <li><code>input</code> – Input 3D raster map (required).</li>
+  <li><code>output</code> – Output file name (required). Example: <code>output=prisma_3d.tif</code>.</li>
+</ul>
+
+<h2>EXAMPLES</h2>
+
 <div class="code"><pre>
-i.hyper.export input=input_map output=output_map
+# Example 1: Export PRISMA 3D raster map to compressed GeoTIFF
+i.hyper.export input=prisma@PERMANENT \
+               output=/data/prisma_3d.tif
 </pre></div>
 
-<div align="center" style="margin: 10px">
-    <a href="i_hyper_export.png">
-    <img src="i_hyper_export.png" width="600" height="600"
-         alt="i_hyper_export example" border="0">
-    </a><br>
-    <i>Figure: Output from example</i>
-</div>
+<h2>OUTPUT</h2>
 
-<h2>REFERENCES</h2>
-This section is optional. List related publications here.
-
-<h2>SEE ALSO</h2>
-List related GRASS tools here.
-<em>
-<a href="https://grass.osgeo.org/grass-stable/manuals/g.region.html">g.region</a>,
-<a href="https://grass.osgeo.org/grass-stable/manuals/r.mapcalc.html">r.mapcalc</a>
-</em>
+<p>The output is a <b>multi-band GeoTIFF</b> file containing one band per spectral layer of the 3D raster map.
+Compression (<b>DEFLATE</b> + <b>PREDICTOR=3</b>) ensures compact and precise floating-point storage.
+Large files are automatically written as BigTIFF when necessary.</p>
 
 <h2>AUTHORS</h2>
 
-Alen Mangafić
+Alen Mangafić and Tomaž Žagar, Geodetic Institute of Slovenia

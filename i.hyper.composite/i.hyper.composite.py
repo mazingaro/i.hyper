@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 ##############################################################################
 # MODULE:    i.hyper.composite
-# AUTHOR(S): Alen Mangafic <alen.mangafic@gis.si>
+# AUTHOR(S): Alen Mangafic and Tomaž Žagar, Geodetic Institute of Slovenia
 # PURPOSE:   Create RGB/CIR/SWIR and custom false color composites
 #            from a hyperspectral 3D raster.
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
 ##############################################################################
 
 # %module
-# % description: Create RGB/CIR/SWIR and custom false color composites from a hyperspectral 3D raster.
+# % description: Create RGB/CIR/SWIR and custom false color composites from a hyperspectral 3D raster map.
 # % keyword: imagery
 # % keyword: hyperspectral
 # % keyword: composite

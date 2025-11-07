@@ -3,12 +3,12 @@
 ##############################################################################
 # MODULE:    i.hyper.export
 # AUTHOR(S): Alen Mangafic and Tomaž Žagar, Geodetic Institute of Slovenia
-# PURPOSE:   Export 3D hyperspectral raster cube as a compressed multi-band GeoTIFF.
+# PURPOSE:   Export 3D hyperspectral 3D raster map.
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
 ##############################################################################
 
 # %module
-# % description: Export 3D hyperspectral raster cube to compressed multi-band GeoTIFF.
+# % description: Export 3D hyperspectral 3D raster map (for now, only available compressed multi-band GeoTIFF)
 # % keyword: raster3d
 # % keyword: export
 # %end
@@ -21,7 +21,7 @@
 
 # %option G_OPT_F_OUTPUT
 # % required: yes
-# % description: Output file name (GeoTIFF will be created)
+# % description: Output file name
 # % guisection: Output
 # %end
 
