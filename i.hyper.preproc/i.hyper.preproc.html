@@ -54,101 +54,43 @@ with <em>i.hyper.export</em> for machine learning workflows.</p>
 
 <h2>EXAMPLES</h2>
 
+# Set the region
+g.region raster_3d=prisma
+
 <div class="code"><pre>
 # Example 1: Savitzky–Golay smoothing (basic denoising)
 i.hyper.preproc input=prisma output=prisma_savgol \
-                steps='sav_gol' \
-                window=7 poly_order=3
+                window_length=7 polyorder=3
 
 # Console output:
-[1/1] Applying Savitzky–Golay smoothing (window=7, poly_order=3)
-Generated 3D raster map: prisma_savgol
+Savitzky–Golay
 </pre></div>
 
 <div class="code"><pre>
-# Example 2: PCA transformation (quiet mode)
+# Example 2: PCA transformation
+# (with interpolation of missing values in valid bands)
 i.hyper.preproc input=enmap output=enmap_pca \
-                steps='pca' components=10 -q
+                dr_method=pca dr_components=10 -q
 
 # Console output:
-[1/1] Performing PCA (10 components)
-Variance output suppressed (-q)
-Generated 3D raster map: enmap_pca
+PCA
+Interpolating missing values across spectral bands...
 </pre></div>
 
 <div class="code"><pre>
-# Example 3: Kernel PCA for nonlinear feature reduction
-i.hyper.preproc input=enmap output=enmap_kpca \
-                steps='kpca' kernel=rbf components=20 gamma=0.001
-
-# Console output:
-[1/1] Performing Kernel PCA (kernel=RBF, gamma=0.001)
-Generated 3D raster map: enmap_kpca
-</pre></div>
-
-<div class="code"><pre>
-# Example 4: Nystroem approximation (fast kernel approximation)
-i.hyper.preproc input=tanager output=tanager_nystrom \
-                steps='nystrom' kernel=rbf components=30
-
-# Console output:
-[1/1] Performing Nystroem kernel approximation (30 components)
-Generated 3D raster map: tanager_nystrom
-</pre></div>
-
-<div class="code"><pre>
-# Example 5: FastICA for source separation
-i.hyper.preproc input=prisma output=prisma_ica \
-                steps='fastica' components=15
-
-# Console output:
-[1/1] Performing FastICA (15 independent components)
-Generated 3D raster map: prisma_ica
-</pre></div>
-
-<div class="code"><pre>
-# Example 6: Truncated SVD (efficient linear decomposition)
-i.hyper.preproc input=enmap output=enmap_tsvd \
-                steps='tsvd' components=25
-
-# Console output:
-[1/1] Performing Truncated SVD (25 components)
-Generated 3D raster map: enmap_tsvd
-</pre></div>
-
-<div class="code"><pre>
-# Example 7: Non-negative Matrix Factorization
-i.hyper.preproc input=tanager output=tanager_nmf \
-                steps='nmf' components=10
-
-# Console output:
-[1/1] Performing Non-negative Matrix Factorization (10 components)
-Generated 3D raster map: tanager_nmf
-</pre></div>
-
-<div class="code"><pre>
-# Example 8: Sparse PCA for interpretable components
-i.hyper.preproc input=enmap output=enmap_sparsepca \
-                steps='sparsepca' components=12 alpha=1.0
-
-# Console output:
-[1/1] Performing Sparse PCA (12 components, alpha=1.0)
-Generated 3D raster map: enmap_sparsepca
-</pre></div>
-
-<div class="code"><pre>
-# Example 9: Combined preprocessing pipeline
+# Example 3: Combined preprocessing pipeline
+# Savitzky–Golay derivative + baseline correction + continuum removal + Nystroem
+# (with interpolation of missing values in valid bands)
 i.hyper.preproc input=tanager output=tanager_ml \
-                steps='sav_gol,baseline,cont_rem,nystrom' \
-                window=9 poly_order=3 components=30
+                polyorder=3 derivative_order=1 window_length=9 \
+                -b -c -q \
+                dr_method=nystroem dr_components=30
 
 # Console output:
-[1/4] Applying Savitzky–Golay smoothing (window=9, poly_order=3)
-[2/4] Performing baseline correction
-[3/4] Performing continuum removal
-[4/4] Performing Nystroem kernel approximation (30 components)
-Generated 3D raster map: tanager_ml
+Savitzky–Golay → Baseline correction → Continuum removal → NYSTROEM
+Interpolating missing values across spectral bands...
 </pre></div>
+
 
 <h2>SEE ALSO</h2>
 
