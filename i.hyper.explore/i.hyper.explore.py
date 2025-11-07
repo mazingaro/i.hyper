@@ -231,6 +231,10 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
 
+    if components_mode:
+        import matplotlib.ticker
+        ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+
     # How many points total (use max across datasets)
     num_points = max((len(ds["points"]) for ds in datasets), default=0)
 
