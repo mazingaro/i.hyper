@@ -1,33 +1,49 @@
 ## DESCRIPTION
 
-The purpose of  <em>i.hyper.import</em> is to compute ...
-Parameter <b>input</b> is a ...
+The purpose of *i.hyper* is to provide a complete toolset for
+hyperspectral data processing in GRASS. It enables importing,
+preprocessing, visualization and exporting of hyperspectral datasets
+(`raster_3d`).
 
 ## NOTES
 
-This is a recommended section to explain the algorithm and parameter
-behavior in a greater detail.
+Modules in the *i.hyper* suite operate together to handle hyperspectral
+workflows. They include tools for data import, spectral preprocessing,
+visualization, and export, fully integrated with the GRASS 3D raster
+environment.
 
-## EXAMPLE
+## DEPENDENCIES
 
-```sh
-i.hyper.import input=input_map output=output_map
-```
+*i.hyper.\** modules require the following Python libraries for full
+functionality:
 
-![i_hyper_import example](i_hyper_import.png)  
-*Figure: Output from example*
+- NumPy
+- SciPy
+- scikit-learn
+- Matplotlib
+- h5py
+- rasterio
+- pyproj
 
-## REFERENCES
+The *i.hyper.explore* module requires the GRASS addon *r3.what\**
 
-This section is optional. List related publications here.
+After dependencies are installed, the toolset can be added to GRASS
+using:
+
+::: code
+
+    g.extension extension=i.hyper
+:::
 
 ## SEE ALSO
 
-List related GRASS tools here.
-
-*[https://grass.osgeo.org/grass-stable/manuals/g.region.html](g.region.html),
-*[https://grass.osgeo.org/grass-stable/manuals/r.mapcalc.html](r.mapcalc.html)*
+*[i.hyper.import](i.hyper.import.html),
+[i.hyper.preproc](i.hyper.preproc.html),
+[i.hyper.explore](i.hyper.explore.html),
+[i.hyper.composite](i.hyper.composite.html),
+[i.hyper.export](i.hyper.export.html)
+[r3.what](https://grass.osgeo.org/grass-stable/manuals/addons/r3.what.html)*
 
 ## AUTHORS
 
-Alen Mangafić
+Alen Mangafić and Tomaž Žagar, Geodetic Institute of Slovenia

@@ -1,43 +1,121 @@
 ## DESCRIPTION
 
-The purpose of *i.hyper.import* is to import hyperspectral imagery nto a GRASS GIS 3D raster format (`raster_3d`). It converts spectral image bands into an internally grouped 3D cube and attaches relevant per-band metadata: **wavelength**, **FWHM**, **valid** and **unit**.
-Currently only **EnMAP L2A** products—i
+*i.hyper.composite* creates RGB, CIR, SWIR and custom false-color
+composites from a hyperspectral 3D raster map (`raster_3d`). The module
+reads per-band wavelength metadata from the 3D raster (as written by
+[i.hyper.import](i.hyper.import.html) /
+[i.hyper.preproc](i.hyper.preproc.html)), selects the nearest available
+bands to requested wavelengths, enhances contrast, and composes a 2D
+color raster.
 
-Parameter **input** is a directory path pointing to an uncompressed EnMAP L2A product folder, which must contain both the `SPECTRAL_IMAGE.TIF` and the corresponding `METADATA.XML`.  
-Parameter **output** defines the base name for the output raster_3d map and all temporary bands.
+Internally, the cube is temporarily exploded into 2D rasters (one per
+band) using `r3.to.rast`. For each composite, the nearest bands to
+target wavelengths are chosen, optional color enhancement is applied
+with `i.colors.enhance`, and the final composite is produced with
+`r.composite`. Temporary rasters and the temporary region are
+automatically cleaned up.
 
-The module parses metadata, checks pixel values, finds unusable bands, and attaches all relevant spectral metadata into the final output cube.
+Predefined composites are provided for common use-cases; custom triplets
+(R,G,B in nm) are supported for sensor-agnostic workflows.
+
+## FUNCTIONALITY
+
+Built-in composites (target wavelengths in nm):
+
+- **rgb** --- \[660, 572, 478\] (true color)
+- **cir** --- \[848, 660, 572\] (color-infrared)
+- **swir_agriculture** --- \[848, 1653, 660\] (vegetation/wetness
+  contrast)
+- **swir_geology** --- \[2200, 848, 572\] (mineral/rock contrast)
+
+**Custom composite:** specify `composites_custom=R,G,B` (wavelengths in
+nm), e.g. `2200,848,572` or `560,860,1640`. The module selects the
+nearest available band to each requested wavelength; it does not
+resample spectrally.
 
 ## NOTES
 
-- Bands that are fully zero, fully null, or contain any negative values are marked with `valid: 0`. All others are marked `valid: 1`. This is used in the other modules to mask the invalid bands.
-- GDAL stderr messages about missing statistics (`Failed to compute min/max`) are suppressed internally to avoid misleading user warnings.
-- The resulted hyperspectral 3D raster map has reflectance values from 0 to 1.
-- All temporary rasters are cleaned up automatically after conversion to `raster_3d`.
+- The input 3D raster must contain per-band wavelength comments in
+  `r3.info` (e.g., lines like `Band 17: 848 nm`); otherwise the module
+  aborts with a clear error.
+- Nearest-band selection is used (no spectral resampling). If your
+  cube's wavelengths differ from the requested targets, the closest
+  bands are chosen.
+- `i.colors.enhance` is run with the provided `strength` (0--100). For
+  the **rgb** composite, the `-p` flag is used to preserve natural RGB
+  balance; other composites run without `-p`.
+- A temporary 3D region is set to the cube; the original region is
+  restored. Temporary 2D rasters are removed on exit.
+- Requires at least 3 bands in the input cube.
 
-This module is designed to be extensible—support for other sensors (e.g., PRISMA `.he5`) will be added in the future.
+## OPTIONS
 
-## EXAMPLE
+- `map` --- input hyperspectral 3D raster map (required).
+- `output` --- output name prefix for generated composites (required).
+- `composites=rgb,cir,swir_agriculture,swir_geology` --- list of presets
+  to create (optional, multiple allowed).
+- `composites_custom=R,G,B` --- custom wavelengths in nm, e.g.
+  `2200,848,572` (optional).
+- `strength` --- enhancement strength for `i.colors.enhance` (0--100,
+  default: 96).
 
-```sh
-i.hyper.import input=/data/ output=enmap product="EnMAP L2A"
-```
+## EXAMPLES
 
-## REFERENCES
+::: code
 
-- EnMAP Data & Access, GFZ German Research Centre for Geosciences. 
-[EnMAP Data & Access](https://www.enmap.org/data_access/)  
+    # Set the region
+    g.region raster_3d=prisma
 
-- GRASS GIS Programmer’s Manual.
+    # Example 1: True color (RGB) and CIR from PRISMA
+    i.hyper.composite map=prisma output=prisma \
+                      composites=rgb,cir
+
+    # Console output:
+    Generated composite raster: prisma_rgb
+    Generated composite raster: prisma_cir
+:::
+
+::: code
+
+    # Example 2: SWIR geology composite from EnMAP
+
+    # Set the region
+    g.region raster_3d=enmap
+
+    i.hyper.composite map=enmap output=enmap \
+                      composites=swir_geology strength=90
+
+    # Console output:
+    Generated composite raster: enmap_swir_geology
+:::
+
+::: code
+
+    # Example 3: Custom Snow/Ice composite (Green–NIR–SWIR)
+
+    # Set the region
+    g.region raster_3d=tanager
+
+    # Uses nearest bands to 560, 860, and 1640 nm
+    i.hyper.composite map=tanager output=snowice \
+                      composites_custom=560,860,1640 strength=92
+
+    # Console output:
+    Generated composite raster: snowice_custom
+:::
 
 ## SEE ALSO
 
-- [r.external](https://grass.osgeo.org/grass-stable/manuals/r.external.html)  
-- [r.to.rast3](https://grass.osgeo.org/grass-stable/manuals/r.to.rast3.html)  
-- [r3.support](https://grass.osgeo.org/grass-stable/manuals/r3.support.html)  
-- [i.group](https://grass.osgeo.org/grass-stable/manuals/i.group.html)
+[i.hyper.import](i.hyper.import.html),
+[i.hyper.preproc](i.hyper.preproc.html),
+[i.hyper.explore](i.hyper.explore.html),
+[i.hyper.export](i.hyper.export.html),
+[r3.to.rast](https://grass.osgeo.org/grass-stable/manuals/r3.to.rast.html),
+[r.composite](https://grass.osgeo.org/grass-stable/manuals/r.composite.html),
+[i.colors.enhance](https://grass.osgeo.org/grass-stable/manuals/i.colors.enhance.html),
+[g.region](https://grass.osgeo.org/grass-stable/manuals/g.region.html),
+[r3.info](https://grass.osgeo.org/grass-stable/manuals/r3.info.html)
 
 ## AUTHORS
 
-Alen Mangafić  
-Geodetic Institute of Slovenia
+Alen Mangafić and Tomaž Žagar, Geodetic Institute of Slovenia
