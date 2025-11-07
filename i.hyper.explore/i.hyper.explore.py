@@ -226,7 +226,7 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength [nm]",
         elif common_units:
             ylabel = common_units
         else:
-            ylabel = "Reflectance (unitless)"
+            ylabel = "Reflectance"
 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
