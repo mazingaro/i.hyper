@@ -33,7 +33,7 @@
 # % key: composites
 # % type: string
 # % multiple: yes
-# % options: RGB,CIR,SWIR_agriculture,SWIR_geology
+# % options: rgb,cir,swir_agriculture,swir_geology
 # % description: Which composites to generate
 # % guisection: Composites
 # %end
@@ -60,10 +60,10 @@ import grass.script as gs
 from grass.pygrass.modules import Module
 
 COMPOSITES = {
-    "RGB": [660, 572, 478],
-    "CIR": [848, 660, 572],
-    "SWIR_agriculture": [848, 1653, 660],
-    "SWIR_geology": [2200, 848, 572],
+    "rgb": [660, 572, 478],
+    "cir": [848, 660, 572],
+    "swir_agriculture": [848, 1653, 660],
+    "swir_geology": [2200, 848, 572],
 }
 
 def _band_count(mapname):
@@ -175,7 +175,7 @@ def main():
             wl = COMPOSITES[comp]
             r, g, b = map_for_nm(wl[0]), map_for_nm(wl[1]), map_for_nm(wl[2])
             outname = f"{outpref}_{comp.lower().replace('-', '_')}"
-            _enhance_and_composite(r, g, b, outname, strength, rgb_preserve=(comp == "RGB"))
+            _enhance_and_composite(r, g, b, outname, strength, rgb_preserve=(comp == "rgb"))
             gs.info(f"Generated composite raster: {outname}")
 
         if custom_wl:

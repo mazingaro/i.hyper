@@ -59,7 +59,7 @@ grass ~/grassdata/hyper_33N/PERMANENT
 <div class="code"><pre>
 # PRISMA L2D example
 i.hyper.import input=/data/PRISMA.he5 \
-               product=PRISMA \
+               product=prisma \
                output=prisma \
                composites='rgb,cir,swir_agriculture,swir_geology'
 
@@ -77,15 +77,15 @@ Generated composite raster: prisma_swir_geology
 <div align="center" style="margin: 10px">
 <div align="center" style="margin: 10px">
   <img src="i_hyper_import_prisma_swir_geology.png" width="600" height="600"
-       alt="PRISMA SWIR_geology composite example" border="0"><br>
-  <i>Figure: PRISMA SWIR_geology composite generated with i.hyper.import</i><br>
+       alt="PRISMA swir_geology composite example" border="0"><br>
+  <i>Figure: PRISMA swir_geology composite generated with i.hyper.import</i><br>
   <small><i>Data source: PRISMA Product © Italian Space Agency (ASI), used under ASI License to Use.</i></small>
 </div>
 
 <div class="code"><pre>
 # Import an EnMAP L2A product and create RGB and CIR composites
 i.hyper.import input=/data/EnMAP_data_folder/ \
-               product=EnMAP \
+               product=enmap \
                output=enmap \
                composites='rgb,cir'
 </pre></div>
@@ -93,7 +93,7 @@ i.hyper.import input=/data/EnMAP_data_folder/ \
 <div class="code"><pre>
 # Tanager example with a custom-defined composite
 i.hyper.import input=/data/Tanager.h5 \
-               product=Tanager \
+               product=tanager \
                output=tanager \
                composites='swir_agriculture' \
                composites_custom='650,1650,2200'

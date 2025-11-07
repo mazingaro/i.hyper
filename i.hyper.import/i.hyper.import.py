@@ -22,8 +22,8 @@
 # % type: string
 # % required: yes
 # % multiple: no
-# % options: PRISMA, EnMAP, Tanager
-# % answer: PRISMA
+# % options: prisma, enmap, tanager
+# % answer: prisma
 # % description: Define the hyperspectral product you want to import.
 # % guisection: Input
 # %end
@@ -39,7 +39,7 @@
 # % type: string
 # % required: no
 # % multiple: yes
-# % options: RGB,CIR,SWIR_agriculture,SWIR_geology
+# % options: rgb,cir,swir_agriculture,swir_geology
 # % description: Composites to generate during import
 # % guisection: Optional
 # %end
@@ -73,9 +73,9 @@ import grass.script as gs
 from grass.script.utils import get_lib_path
 
 PRODUCT_MODULE_MAP = {
-    "EnMAP": "enmap",
-    "PRISMA": "prisma",
-    "Tanager": "tanager",
+    "enmap": "enmap",
+    "prisma": "prisma",
+    "tanager": "tanager",
 }
 
 def import_by_product(product, options, flags):

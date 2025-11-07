@@ -25,10 +25,10 @@ from tanager_reader import (
 )
 
 COMPOSITES = {
-    "RGB":              [660.0, 572.0, 478.0],
-    "CIR":              [848.0, 660.0, 572.0],
-    "SWIR_agriculture": [848.0, 1653.0, 660.0],
-    "SWIR_geology":     [2200.0, 848.0, 572.0],
+    "rgb":              [660.0, 572.0, 478.0],
+    "cir":              [848.0, 660.0, 572.0],
+    "swir_agriculture": [848.0, 1653.0, 660.0],
+    "swir_geology":     [2200.0, 848.0, 572.0],
 }
 
 # -------------------------- helpers --------------------------
@@ -100,7 +100,7 @@ def import_tanager(
             else:
                 gs.warning(f"Ignored unknown composite '{comp}'.")
     else:
-        wanted.append(("RGB", COMPOSITES["RGB"]))
+        wanted.append(("rgb", COMPOSITES["rgb"]))
 
     if custom_wavelengths:
         if len(custom_wavelengths) != 3:
@@ -186,7 +186,7 @@ def import_tanager(
         gs.warning(f"3D cube creation failed: {e}")
 
     # -------------------------- composites --------------------------
-    rgb_target = COMPOSITES["RGB"]
+    rgb_target = COMPOSITES["rgb"]
     rgb_indices_1b = [_find_nearest_band_1based(w, wl) for w in rgb_target]
     for idx1 in rgb_indices_1b:
         ensure_band_written(idx1)
@@ -200,7 +200,7 @@ def import_tanager(
             maps.append(temp_bands[idx1] if idx1 in temp_bands else ensure_band_written(idx1))
 
         Module("g.region", raster=maps[0], quiet=True)
-        if name.upper() == "RGB":
+        if name.upper() == "rgb":
             Module("i.colors.enhance", red=maps[0], green=maps[1], blue=maps[2],
                    strength=str(strength_val), flags="p", quiet=True)
         else:

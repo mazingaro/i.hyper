@@ -5,10 +5,10 @@ import contextlib
 from statistics import mean
 
 COMPOSITES = {
-    "RGB": [660, 572, 478],
-    "CIR": [848, 660, 572],
-    "SWIR_agriculture": [848, 1653, 660],
-    "SWIR_geology": [2200, 848, 572]
+    "rgb": [660, 572, 478],
+    "cir": [848, 660, 572],
+    "swir_agriculture": [848, 1653, 660],
+    "swir_geology": [2200, 848, 572]
 }
 
 @contextlib.contextmanager
@@ -108,7 +108,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
                    description="Validated band", quiet=True)
 
         # composites
-        rgb_target = COMPOSITES["RGB"]
+        rgb_target = COMPOSITES["rgb"]
         rgb_indices = [find_nearest_band(wl, wavelengths) for wl in rgb_target]
         rgb_enhanced = {i: band_names[i - 1] for i in rgb_indices}
 
@@ -121,7 +121,7 @@ def import_enmap(folder, output, composites=None, custom_wavelengths=None, stren
                     continue
                 bands = [find_nearest_band(wl, wavelengths) for wl in COMPOSITES[comp]]
                 rgb_maps = [rgb_enhanced.get(b, band_names[b - 1]) for b in bands]
-                if comp.upper() == "RGB":
+                if comp.upper() == "rgb":
                     Module("i.colors.enhance", red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
                            strength=str(strength_val), flags="p", quiet=True)
                 else:

@@ -21,10 +21,10 @@ from grass.pygrass.modules import Module
 from prisma_reader import load_prisma_l2d, concatenate_hyperspectral
 
 COMPOSITES = {
-    "RGB":              [660.0, 572.0, 478.0],
-    "CIR":              [848.0, 660.0, 572.0],
-    "SWIR_agriculture": [848.0, 1653.0, 660.0],
-    "SWIR_geology":     [2200.0, 848.0, 572.0],
+    "rgb":              [660.0, 572.0, 478.0],
+    "cir":              [848.0, 660.0, 572.0],
+    "swir_agriculture": [848.0, 1653.0, 660.0],
+    "swir_geology":     [2200.0, 848.0, 572.0],
 }
 
 # -------------------------- helpers --------------------------
@@ -144,7 +144,7 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
             else:
                 gs.warning(f"Unknown composite '{comp}' ignored.")
     else:
-        wanted.append(("RGB", COMPOSITES["RGB"]))
+        wanted.append(("rgb", COMPOSITES["rgb"]))
 
     if custom_wavelengths:
         if len(custom_wavelengths) != 3:
@@ -169,7 +169,7 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
         return name
 
     # Prime the "rgb_enhanced" mapping:
-    rgb_target = COMPOSITES["RGB"]
+    rgb_target = COMPOSITES["rgb"]
     rgb_indices_1b = [_find_nearest_band_1based(w, wavelengths) for w in rgb_target]
     # Create these bands now and cache
     for idx1 in rgb_indices_1b:
@@ -254,7 +254,7 @@ def import_prisma(input_path, output_name, composites=None, custom_wavelengths=N
                 rgb_maps.append(ensure_band_written(idx1))
 
         Module("g.region", raster=rgb_maps[0], quiet=True)
-        if name.upper() == "RGB":
+        if name.upper() == "rgb":
             Module("i.colors.enhance", red=rgb_maps[0], green=rgb_maps[1], blue=rgb_maps[2],
                    strength=str(strength_val), flags="p", quiet=True)
             outname = f"{output_name}_{name.lower().replace('-', '_')}"
