@@ -180,7 +180,7 @@ def _sample_at_3dpoint(mapname, e, n, z, sep="|", null_marker="*"):
     )
     return out.strip().split(sep)[-1]
 
-def _plot_results_multi(datasets, title=None, xlabel="Wavelength (nm)",
+def _plot_results_multi(datasets, title=None, xlabel="Wavelength [nm]",
                         ylabel="Value", output=None, size=None):
     """
     datasets: list of dicts:
@@ -422,7 +422,7 @@ def main(options, flags):
     _plot_results_multi(
         datasets=datasets,
         title="Spectra",
-        xlabel="Wavelength (nm)",
+        xlabel="Wavelength [nm]",
         ylabel="Value",
         output=options.get("output"),
         size=options.get("size"),
