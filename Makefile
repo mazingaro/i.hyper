@@ -1,7 +1,5 @@
 MODULE_TOPDIR = ../..
 
-PGM = i.hyper
-
 SUBDIRS = i_hyper_lib \
         i.hyper.import \
         i.hyper.preproc \
@@ -11,7 +9,7 @@ SUBDIRS = i_hyper_lib \
 
 include $(MODULE_TOPDIR)/include/Make/Dir.make
 
-default: parsubdirs htmldir
+default: parsubdirs
 
 install: installsubdirs
-	$(INSTALL_DATA) $(PGM).html $(INST_DIR)/docs/html/
+	$(INSTALL_DATA) i.hyper.html $(INST_DIR)/docs/html/
