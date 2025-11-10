@@ -52,6 +52,14 @@
 # % required: no
 # %end
 
+# %option
+# % key: style_scale
+# % type: double
+# % label: Scale factor for fonts and line widths when exporting (e.g., 1.8)
+# % required: no
+# % answer: 1.0
+# %end
+
 import grass.script as gs
 import json
 import re
@@ -181,7 +189,7 @@ def _sample_at_3dpoint(mapname, e, n, z, sep="|", null_marker="*"):
     return out.strip().split(sep)[-1]
 
 def _plot_results_multi(datasets, title=None, xlabel="Wavelength [nm]",
-                        ylabel="Value", output=None, size=None):
+                        ylabel="Value", output=None, size=None, style_scale=1.0):
     """
     datasets: list of dicts:
       {
@@ -202,6 +210,15 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength [nm]",
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
+
+    # scale fonts & default line width only when exporting
+    if output and style_scale and float(style_scale) != 1.0:
+        base_font = plt.rcParams.get("font.size", 10.0)
+        base_line = plt.rcParams.get("lines.linewidth", 1.5)
+        plt.rcParams.update({
+            "font.size": float(base_font) * float(style_scale),
+            "lines.linewidth": float(base_line) * float(style_scale),
+        })
 
     linestyles = ["-", "--", "-.", ":", (0, (5, 1)), (0, (3, 1, 1, 1)), (0, (1, 1))]
     fig, ax = plt.subplots()
@@ -278,7 +295,8 @@ def _plot_results_multi(datasets, title=None, xlabel="Wavelength [nm]",
             vals = vals[order]
 
             ls = linestyles[mi % len(linestyles)]
-            ax.plot(wl, vals, linestyle=ls, linewidth=1.6, color=color)
+            lw = 1.6 * (float(style_scale) if (output and style_scale) else 1.0)
+            ax.plot(wl, vals, linestyle=ls, linewidth=lw, color=color)
 
     ax.grid(True, alpha=0.3)
 
@@ -426,6 +444,7 @@ def main(options, flags):
         ylabel="Value",
         output=options.get("output"),
         size=options.get("size"),
+        style_scale=float(options.get("style_scale") or 1.0)
     )
 
 if __name__ == "__main__":
