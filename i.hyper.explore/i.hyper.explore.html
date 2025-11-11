@@ -29,7 +29,8 @@ If the map contains principal components or other dimensionally reduced features
   <li>Each band’s wavelength and FWHM must be stored as comments in <code>r3.info</code> (automatically handled by <em>i.hyper.import</em>).</li>
   <li>The module uses <code>r3.what</code> to extract band values at each 2D location.</li>
   <li>If the raster represents dimensional components (e.g., PCA, NMF), the plot’s X-axis switches to “Components”.</li>
-  <li>Output plots can be resized with <code>size=width,height</code> (in pixels).</li>
+  <li>The output plot resolution can be set with <code>dpi=</code> (default: 300).</li>
+  <li>Line width and font size can be scaled with <code>style_scale=</code> (default: 1.0).</li>
   <li>Line colors correspond to query points; linestyles correspond to input maps.</li>
   <li>Interactive plots support renaming legends and saving figures directly from the viewer.</li>
 </ul>
