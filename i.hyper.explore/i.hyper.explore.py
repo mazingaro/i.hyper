@@ -51,6 +51,7 @@
 # % type: integer
 # % label: DPI value for output image (used only with output=)
 # % required: no
+# % answer: 300
 # %end
 
 # %option
@@ -500,7 +501,7 @@ def main(options, flags):
         xlabel="Wavelength [nm]",
         ylabel="Value",
         output=options.get("output"),
-        dpi=options.get("dpi"),
+        dpi=int(options.get("dpi")),
         style_scale=float(options.get("style_scale") or 1.0),
     )
 
