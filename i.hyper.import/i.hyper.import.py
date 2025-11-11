@@ -4,6 +4,7 @@
 # AUTHOR(S): Alen Mangafic and Tomaž Žagar, Geodetic Institute of Slovenia
 # PURPOSE:   Hyperspectral imagery import.
 # COPYRIGHT: (C) 2025 by Alen Mangafic and the GRASS Development Team
+# SPDX-License-Identifier: GPL-2.0-or-later
 ##############################################################################
 
 # %module
@@ -78,6 +79,7 @@ PRODUCT_MODULE_MAP = {
     "tanager": "tanager",
 }
 
+
 def import_by_product(product, options, flags):
     module_name = PRODUCT_MODULE_MAP.get(product)
     if not module_name:
@@ -93,11 +95,13 @@ def import_by_product(product, options, flags):
     spec.loader.exec_module(module)
     return module
 
+
 def main(options, flags):
     product = options["product"]
     gs.info(f"Importing product: {product}")
     import_hyper = import_by_product(product, options, flags)
     import_hyper.run_import(options, flags)
+
 
 if __name__ == "__main__":
     options, flags = gs.parser()

@@ -1,3 +1,8 @@
+---
+name: i.hyper
+description: i.hyper family modules
+---
+
 ## DESCRIPTION
 
 The purpose of *i.hyper* is to provide a complete toolset for
