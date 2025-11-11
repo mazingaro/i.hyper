@@ -67,8 +67,8 @@ def _write_float_raster(name, data_2d_float32):
 
 
 def import_tanager(
-    input_path: str,
-    output_name: str,
+    input_path,
+    output_name,
     composites=None,
     custom_wavelengths=None,
     strength_val=96,

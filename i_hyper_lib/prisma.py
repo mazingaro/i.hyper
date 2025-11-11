@@ -118,7 +118,7 @@ def import_prisma(
     Reflectance is float32; per-band temp rasters are created on demand and reused across composites.
     """
     he5 = _resolve_he5(input_path)
-    prod = load_prisma_l2d(he5, load_pan=False, compute_utm=False)
+    prod = load_prisma_l2d(he5, load_pan=False)
 
     _require(prod.hco_geo is not None, "HCO geolocation missing.")
     _require(prod.vnir and prod.vnir.dn is not None, "VNIR cube missing.")

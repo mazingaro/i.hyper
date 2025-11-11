@@ -17,9 +17,7 @@ Tanager BASIC reader and map projection + gridding helpers
   * optionally fills purely geometric gaps within a small neighborhood
 """
 
-from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Tuple
 import json
 import numpy as np
 import h5py
@@ -60,35 +58,35 @@ DS_LON = f"{GF}/Longitude"
 
 @dataclass
 class TanagerProduct:
-    path: str
-    data: np.ndarray  # (rows, cols, bands), float32
-    wavelengths_nm: np.ndarray  # (bands,)
-    fwhm_nm: np.ndarray  # (bands,)
-    lat: Optional[np.ndarray]  # (rows, cols)
-    lon: Optional[np.ndarray]  # (rows, cols)
-    attrs: Dict[str, Any]  # top-level file attributes (optional use)
-    data_field: str  # 'surface_reflectance' or 'toa_radiance'
-    data_units: str  # human-readable units string
+    path
+    data
+    wavelengths_nm
+    fwhm_nm
+    lat
+    lon
+    attrs
+    data_field
+    data_units
 
 
 @dataclass(frozen=True)
 class MapGrid:
     """Target map grid parsed from Planet_Ortho_Framing."""
 
-    epsg: int
-    west: float  # geotransform[0]
-    north: float  # geotransform[3]
-    ewres: float  # +pixel width  (meters)
-    nsres: float  # +pixel height (meters)
-    rows: int
-    cols: int
+    epsg
+    west
+    north
+    ewres
+    nsres
+    rows
+    cols
 
     @property
-    def east(self) -> float:
+    def east(self):
         return self.west + self.cols * self.ewres
 
     @property
-    def south(self) -> float:
+    def south(self):
         return self.north - self.rows * self.nsres
 
 
@@ -96,39 +94,37 @@ class MapGrid:
 class SplatPlan:
     """Precomputed per-scene bilinear splat geometry and masks."""
 
-    rows: int
-    cols: int
+    rows
+    cols
     # neighbor indices
-    r0: np.ndarray
-    c0: np.ndarray
-    r1: np.ndarray
-    c1: np.ndarray
-    r2: np.ndarray
-    c2: np.ndarray
-    r3: np.ndarray
-    c3: np.ndarray
+    r0
+    c0
+    r1
+    c1
+    r2
+    c2
+    r3
+    c3
     # neighbor weights
-    w0: np.ndarray
-    w1: np.ndarray
-    w2: np.ndarray
-    w3: np.ndarray
+    w0
+    w1
+    w2
+    w3
     # geometry mask (valid transform & indices in bounds)
-    inb: np.ndarray
+    inb
     # accumulated once (band-independent)
-    visit: np.ndarray  # any sample (valid or nodata) contributed
-    vnod: np.ndarray  # nodata-only influence
+    visit
+    vnod
 
 
 # ---------------------------- Reader ----------------------------
 
 
-def _maybe(f: h5py.File, path: str):
+def _maybe(f, path):
     return f[path][()] if path in f else None
 
 
-def _units_from_attrs(
-    attrs: h5py.AttributeManager, fallback: Optional[str]
-) -> Optional[str]:
+def _units_from_attrs(attrs, fallback):
     """
     Try to read units from common attribute keys (case-insensitive).
     Returns string if found (as-is), else fallback.
@@ -147,10 +143,10 @@ def _units_from_attrs(
     return fallback
 
 
-def load_tanager_basic(product_path: str) -> TanagerProduct:
+def load_tanager_basic(product_path):
     with h5py.File(product_path, "r") as f:
         # file-level attributes (optional)
-        attrs: Dict[str, Any] = {}
+        attrs = {}
         for k, v in f.attrs.items():
             try:
                 attrs[k] = (
@@ -238,7 +234,7 @@ def load_tanager_basic(product_path: str) -> TanagerProduct:
 # ---------------------------- Projection + gridding helpers ----------------------------
 
 
-def read_planet_map_grid(product_path: str) -> MapGrid:
+def read_planet_map_grid(product_path):
     """
     Parse Planet_Ortho_Framing from:
       /HDFEOS/SWATHS/HYP/Geolocation Fields : Planet_Ortho_Framing
@@ -263,9 +259,7 @@ def read_planet_map_grid(product_path: str) -> MapGrid:
     return MapGrid(epsg, west, north, ewres, nsres, rows, cols)
 
 
-def _transform_lonlat(
-    lon: np.ndarray, lat: np.ndarray, epsg: int
-) -> Tuple[np.ndarray, np.ndarray]:
+def _transform_lonlat(lon, lat, epsg):
     """Vectorized transformation WGS84 lon/lat -> target EPSG (meters)."""
     if not _HAS_PYPROJ:
         raise RuntimeError("pyproj is required for in-memory map projection.")
@@ -274,12 +268,7 @@ def _transform_lonlat(
     return np.asarray(x), np.asarray(y)
 
 
-def build_splat_plan(
-    lon2d: np.ndarray,
-    lat2d: np.ndarray,
-    grid: MapGrid,
-    nodata_mask: Optional[np.ndarray],
-) -> SplatPlan:
+def build_splat_plan(lon2d, lat2d, grid, nodata_mask):
     """
     Build per-scene bilinear splat indices/weights and band-independent masks:
       - visit: any sample (valid or nodata) contributes
@@ -358,9 +347,7 @@ def build_splat_plan(
     )
 
 
-def splat_band_with_plan(
-    values: np.ndarray, plan: SplatPlan, nodata: float = np.nan
-) -> Tuple[np.ndarray, np.ndarray]:
+def splat_band_with_plan(values, plan, nodata=np.nan):
     """
     Bilinear forward splat using a precomputed SplatPlan.
     Returns:
@@ -389,9 +376,7 @@ def splat_band_with_plan(
     return ortho, wts
 
 
-def project_band_to_map_grid(
-    band2d: np.ndarray, plan: SplatPlan, fill_8_neighbor: bool = True
-) -> np.ndarray:
+def project_band_to_map_grid(band2d, plan, fill_8_neighbor=True):
     """
     Project and resample one band to the target map grid using a SplatPlan.
     Optionally fills purely geometric gaps via nearest neighbor limited to the 8-neighborhood.

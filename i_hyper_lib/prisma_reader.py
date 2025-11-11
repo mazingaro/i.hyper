@@ -15,9 +15,7 @@ Spec assumptions (strict):
 - EPSG code is stored in global attribute 'Epsg_Code'.
 """
 
-from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, Any
 import numpy as np
 import h5py
 
@@ -69,65 +67,65 @@ ATTR_EPSG = "Epsg_Code"  # strict per spec
 # ---- Data containers ----
 @dataclass
 class BandInfo:
-    wavelengths_nm: np.ndarray  # (bands_kept,)
-    fwhm_nm: np.ndarray  # (bands_kept,)
-    present_flags: np.ndarray  # (bands_kept,) all ones after filtering
+    wavelengths_nm
+    fwhm_nm
+    present_flags
     # Added: indices of kept bands in the original band axis (0-based)
-    kept_indices: np.ndarray  # (bands_kept,)
+    kept_indices
 
 
 @dataclass
 class PrismaCube:
-    name: str  # "VNIR" | "SWIR" | "PAN"
-    dn: Optional[np.ndarray]  # VNIR/SWIR: (rows, cols, bands); PAN: (rows, cols)
-    err: Optional[np.ndarray]  # same spatial shape; band-dim if provided
-    scale_min: Optional[float]
-    scale_max: Optional[float]
-    bands: Optional[BandInfo] = None  # None for PAN
+    name
+    dn
+    err
+    scale_min
+    scale_max
+    bands = None  # None for PAN
 
-    def to_reflectance(self) -> Optional[np.ndarray]:
+    def to_reflectance(self):
         if self.dn is None or self.scale_min is None or self.scale_max is None:
             return None
         return self.scale_min + (
             self.dn.astype(np.float32) * (self.scale_max - self.scale_min) / 65535.0
         )
 
-    def valid_mask(self) -> Optional[np.ndarray]:
+    def valid_mask(self):
         return (self.err == 0) if self.err is not None else None
 
 
 @dataclass
 class Geolocation:
-    lat: np.ndarray  # (rows, cols)
-    lon: np.ndarray  # (rows, cols)
-    x_m: Optional[np.ndarray]  # not computed here
-    y_m: Optional[np.ndarray]
-    utm_epsg: Optional[int]
-    center_e: Optional[float] = None
-    center_n: Optional[float] = None
-    ll_e: Optional[float] = None
-    ll_n: Optional[float] = None
-    lr_e: Optional[float] = None
-    lr_n: Optional[float] = None
-    ul_e: Optional[float] = None
-    ul_n: Optional[float] = None
-    ur_e: Optional[float] = None
-    ur_n: Optional[float] = None
+    lat
+    lon
+    x_m
+    y_m
+    utm_epsg
+    center_e = None
+    center_n = None
+    ll_e = None
+    ll_n = None
+    lr_e = None
+    lr_n = None
+    ul_e = None
+    ul_n = None
+    ur_e = None
+    ur_n = None
 
 
 @dataclass
 class PrismaL2DProduct:
-    path: str
-    vnir: Optional[PrismaCube]
-    swir: Optional[PrismaCube]
-    pan: Optional[PrismaCube]
-    hco_geo: Optional[Geolocation]
-    pco_geo: Optional[Geolocation]
-    attrs: Dict[str, Any]
+    path
+    vnir
+    swir
+    pan
+    hco_geo
+    pco_geo
+    attrs
 
 
 # ---- Internal helpers ----
-def _read_attr_as_array(attrs: h5py.AttributeManager, key: str) -> Optional[np.ndarray]:
+def _read_attr_as_array(attrs, key):
     if key not in attrs:
         return None
     v = attrs[key]
@@ -151,7 +149,7 @@ def _read_attr_as_array(attrs: h5py.AttributeManager, key: str) -> Optional[np.n
     return None
 
 
-def _read_attr_scalar(attrs: h5py.AttributeManager, key: str) -> Optional[float]:
+def _read_attr_scalar(attrs, key):
     if key not in attrs:
         return None
     v = attrs[key]
@@ -168,19 +166,17 @@ def _read_attr_scalar(attrs: h5py.AttributeManager, key: str) -> Optional[float]
         return None
 
 
-def _select_present_bands(cw: np.ndarray, fwhm: np.ndarray, flags: np.ndarray):
+def _select_present_bands(cw, fwhm, flags):
     flags = flags.astype(int).ravel()
     idx = np.where(flags == 1)[0]  # 0-based indices into the original band axis
     return cw[idx], fwhm[idx], idx
 
 
-def _maybe_read(f: h5py.File, path: str) -> Optional[np.ndarray]:
+def _maybe_read(f, path):
     return f[path][()] if path in f else None
 
 
-def _load_bandinfo_from_attrs(
-    attrs: h5py.AttributeManager, cw_key: str, fwhm_key: str, flags_key: str
-) -> Optional[BandInfo]:
+def _load_bandinfo_from_attrs(attrs, cw_key, fwhm_key, flags_key):
     cw = _read_attr_as_array(attrs, cw_key)
     fwhm = _read_attr_as_array(attrs, fwhm_key)
     flags = _read_attr_as_array(attrs, flags_key)
@@ -195,7 +191,7 @@ def _load_bandinfo_from_attrs(
     )
 
 
-def _read_corners(attrs: h5py.AttributeManager) -> Dict[str, Optional[float]]:
+def _read_corners(attrs):
     keys = [
         ATTR_CENTER_E,
         ATTR_CENTER_N,
@@ -212,7 +208,7 @@ def _read_corners(attrs: h5py.AttributeManager) -> Dict[str, Optional[float]]:
 
 
 # Fixed, spec-driven: (E, B, N) -> (N, E, B)
-def _l2d_bil_to_rows_cols_bands(arr: np.ndarray) -> np.ndarray:
+def _l2d_bil_to_rows_cols_bands(arr):
     """
     PRISMA L2D VNIR/SWIR cubes are (nEastingPixel, nBands, nNorthingPixel).
     Return array as (rows=N, cols=E, bands=B) i.e. np.transpose(arr, (2, 0, 1)).
@@ -223,14 +219,10 @@ def _l2d_bil_to_rows_cols_bands(arr: np.ndarray) -> np.ndarray:
 
 
 # ---- Public API ----
-def load_prisma_l2d(
-    product_path: str,
-    load_pan: bool = False,
-    compute_utm: bool = False,  # kept for signature compatibility; not used
-) -> PrismaL2DProduct:
+def load_prisma_l2d(product_path, load_pan=False):
     with h5py.File(product_path, "r") as f:
         # Global attrs (kept for reference)
-        attrs: Dict[str, Any] = {}
+        attrs = {}
         for k, v in f.attrs.items():
             try:
                 attrs[k] = (
@@ -371,9 +363,7 @@ def load_prisma_l2d(
     )
 
 
-def concatenate_hyperspectral(
-    product: PrismaL2DProduct,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def concatenate_hyperspectral(product):
     """
     Concatenate VNIR and SWIR reflectance along band axis (bands-last), **after filtering**
     to only the bands marked present (flags==1). This keeps the reflectance cube and the

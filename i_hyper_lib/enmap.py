@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-import sys, os, xml.etree.ElementTree as ET, rasterio, grass.script as gs
+import sys
+import os
+import xml.etree.ElementTree as ET
+import rasterio
+import grass.script as gs
 from grass.pygrass.modules import Module
 import contextlib
 from statistics import mean
