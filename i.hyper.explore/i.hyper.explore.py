@@ -47,9 +47,9 @@
 # %end
 
 # %option
-# % key: size
-# % type: string
-# % label: Size of output image as width,height in pixels (used only with output=)
+# % key: dpi
+# % type: integer
+# % label: DPI value for output image (used only with output=)
 # % required: no
 # %end
 
@@ -202,7 +202,7 @@ def _plot_results_multi(
     xlabel="Wavelength [nm]",
     ylabel="Value",
     output=None,
-    size=None,
+    dpi=300,
     style_scale=1.0,
 ):
     """
@@ -375,18 +375,10 @@ def _plot_results_multi(
             loc="lower right",
             fontsize="small",
             framealpha=0.9,
-        )
-
-    # Output size
-    if size and output:
-        try:
-            w_px, h_px = [int(s) for s in size.split(",")]
-            fig.set_size_inches(w_px / 100.0, h_px / 100.0)
-        except Exception:
-            pass
+        )    
 
     if output:
-        fig.savefig(output, bbox_inches="tight")
+        fig.savefig(output, bbox_inches="tight", dpi=dpi)
     else:
         plt.show()
 
@@ -508,7 +500,7 @@ def main(options, flags):
         xlabel="Wavelength [nm]",
         ylabel="Value",
         output=options.get("output"),
-        size=options.get("size"),
+        dpi=options.get("dpi"),
         style_scale=float(options.get("style_scale") or 1.0),
     )
 
