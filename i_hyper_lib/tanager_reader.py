@@ -17,7 +17,9 @@ Tanager BASIC reader and map projection + gridding helpers
   * optionally fills purely geometric gaps within a small neighborhood
 """
 
+from __future__ import annotations
 from dataclasses import dataclass
+from typing import Any
 import json
 import numpy as np
 import h5py
@@ -58,28 +60,28 @@ DS_LON = f"{GF}/Longitude"
 
 @dataclass
 class TanagerProduct:
-    path
-    data
-    wavelengths_nm
-    fwhm_nm
-    lat
-    lon
-    attrs
-    data_field
-    data_units
+    path: str
+    data: np.ndarray  # (rows, cols, bands), float32
+    wavelengths_nm: np.ndarray  # (bands,)
+    fwhm_nm: np.ndarray  # (bands,)
+    lat: np.ndarray | None  # (rows, cols)
+    lon: np.ndarray | None  # (rows, cols)
+    attrs: dict[str, Any]  # top-level file attributes (optional use)
+    data_field: str  # 'surface_reflectance' or 'toa_radiance'
+    data_units: str  # human-readable units string
 
 
 @dataclass(frozen=True)
 class MapGrid:
     """Target map grid parsed from Planet_Ortho_Framing."""
 
-    epsg
-    west
-    north
-    ewres
-    nsres
-    rows
-    cols
+    epsg: int
+    west: float  # geotransform[0]
+    north: float  # geotransform[3]
+    ewres: float  # +pixel width  (meters)
+    nsres: float  # +pixel height (meters)
+    rows: int
+    cols: int
 
     @property
     def east(self):
@@ -94,27 +96,27 @@ class MapGrid:
 class SplatPlan:
     """Precomputed per-scene bilinear splat geometry and masks."""
 
-    rows
-    cols
+    rows: int
+    cols: int
     # neighbor indices
-    r0
-    c0
-    r1
-    c1
-    r2
-    c2
-    r3
-    c3
+    r0: np.ndarray
+    c0: np.ndarray
+    r1: np.ndarray
+    c1: np.ndarray
+    r2: np.ndarray
+    c2: np.ndarray
+    r3: np.ndarray
+    c3: np.ndarray
     # neighbor weights
-    w0
-    w1
-    w2
-    w3
+    w0: np.ndarray
+    w1: np.ndarray
+    w2: np.ndarray
+    w3: np.ndarray
     # geometry mask (valid transform & indices in bounds)
-    inb
+    inb: np.ndarray
     # accumulated once (band-independent)
-    visit
-    vnod
+    visit: np.ndarray  # any sample (valid or nodata) contributed
+    vnod: np.ndarray  # nodata-only influence
 
 
 # ---------------------------- Reader ----------------------------

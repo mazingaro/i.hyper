@@ -15,7 +15,9 @@ Spec assumptions (strict):
 - EPSG code is stored in global attribute 'Epsg_Code'.
 """
 
+from __future__ import annotations
 from dataclasses import dataclass
+from typing import Any
 import numpy as np
 import h5py
 
@@ -67,21 +69,21 @@ ATTR_EPSG = "Epsg_Code"  # strict per spec
 # ---- Data containers ----
 @dataclass
 class BandInfo:
-    wavelengths_nm
-    fwhm_nm
-    present_flags
+    wavelengths_nm: np.ndarray  # (bands_kept,)
+    fwhm_nm: np.ndarray  # (bands_kept,)
+    present_flags: np.ndarray  # (bands_kept,) all ones after filtering
     # Added: indices of kept bands in the original band axis (0-based)
-    kept_indices
+    kept_indices: np.ndarray  # (bands_kept,)
 
 
 @dataclass
 class PrismaCube:
-    name
-    dn
-    err
-    scale_min
-    scale_max
-    bands = None  # None for PAN
+    name: str  # "VNIR" | "SWIR" | "PAN"
+    dn: np.ndarray | None  # VNIR/SWIR: (rows, cols, bands); PAN: (rows, cols)
+    err: np.ndarray | None  # same spatial shape; band-dim if provided
+    scale_min: float | None
+    scale_max: float | None
+    bands: BandInfo | None = None  # None for PAN
 
     def to_reflectance(self):
         if self.dn is None or self.scale_min is None or self.scale_max is None:
@@ -96,32 +98,32 @@ class PrismaCube:
 
 @dataclass
 class Geolocation:
-    lat
-    lon
-    x_m
-    y_m
-    utm_epsg
-    center_e = None
-    center_n = None
-    ll_e = None
-    ll_n = None
-    lr_e = None
-    lr_n = None
-    ul_e = None
-    ul_n = None
-    ur_e = None
-    ur_n = None
+    lat: np.ndarray  # (rows, cols)
+    lon: np.ndarray  # (rows, cols)
+    x_m: np.ndarray | None  # not computed here
+    y_m: np.ndarray | None
+    utm_epsg: int | None
+    center_e: float | None = None
+    center_n: float | None = None
+    ll_e: float | None = None
+    ll_n: float | None = None
+    lr_e: float | None = None
+    lr_n: float | None = None
+    ul_e: float | None = None
+    ul_n: float | None = None
+    ur_e: float | None = None
+    ur_n: float | None = None
 
 
 @dataclass
 class PrismaL2DProduct:
-    path
-    vnir
-    swir
-    pan
-    hco_geo
-    pco_geo
-    attrs
+    path: str
+    vnir: PrismaCube | None
+    swir: PrismaCube | None
+    pan: PrismaCube | None
+    hco_geo: Geolocation | None
+    pco_geo: Geolocation | None
+    attrs: dict[str, Any]
 
 
 # ---- Internal helpers ----
