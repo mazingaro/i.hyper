@@ -1,4 +1,4 @@
-## Note
+## Deprecated
 
 This is not community-maintained (version from 9. december 2025)
 
